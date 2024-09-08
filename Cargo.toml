@@ -1,5 +1,5 @@
 [workspace]
-members = ["jpegxl-src", "jpegxl-sys", "jpegxl-rs"]
+members = ["jpegxl-src", "jpegxl-sys", "jpegxl-rs", "wytros"]
 resolver = "2"
 
 [workspace.package]

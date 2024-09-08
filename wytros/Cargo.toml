@@ -1,0 +1,45 @@
+[package]
+authors = ["Inflation <me@shimotsuki.ink>"]
+categories = ["encoding", "multimedia::images"]
+description = "Losslessly compress RAW files with jpeg-xl"
+edition = "2021"
+keywords = ["jpeg-xl", "jxl", "bayer"]
+license = "GPL-3.0-or-later"
+name = "wytros"
+readme = "README.md"
+repository = ""
+version = "0.0.1"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lints.rust]
+missing_docs = "warn"
+
+[lints.clippy]
+pedantic = "warn"
+
+[dependencies]
+derive_builder = "0.20.0"
+#image = { version = "0.24.8", optional = true, default-features = false }
+thiserror = "1.0.56"
+half = "2.4.0"
+byteorder = "1.5.0"
+
+[dependencies.jpegxl-rs]
+version = "0.10.0"
+path = "../jpegxl-rs"
+default-features = false
+
+[dev-dependencies]
+#image = { version = "0.24.8", default-features = false, features = [
+#    "jpeg",
+#    "png",
+#] }
+#lcms2 = "=6.1.0"
+pretty_assertions = "1.4.0"
+testresult = "0.3.0"
+
+
+[package.metadata.docs.rs]
+rustdoc-args = ["--cfg", "docsrs"]
+features = ["docs"]
