@@ -173,15 +173,13 @@ fn decode_chunk(bits: ReverseBits) -> [u16; 14] {
 /// `pxs` is 2 previously encoded pixels + 3 to-be-encoded
 fn calculate_shift(pxs: &[u16]) -> u8 {
     let mut diffs = [0; 3];
-    dh!(&pxs[..5]);
     pxs[..3].iter()
         .zip(pxs[2..][..3].iter())
         .map(|(p, n)| *n as i16 - *p as i16)
         .zip(diffs.iter_mut())
         .for_each(|(d, o)| *o = d);
-    dh!(diffs);
     let maxdiff = diffs.iter().map(|d| d.abs() as u16).max().unwrap();
-    let magnitude = dh!((dh!(maxdiff)+1).next_power_of_two());
+    let magnitude = (maxdiff+1).next_power_of_two();
     match magnitude >> 8 {
         0 => 0,
         1 => 1,
@@ -210,7 +208,7 @@ fn encode_chunk(pxs: &[u16; 14]) -> [u8; 16] {
             
         }
         */
-        bits.set(24 + diffidx * (2+3*8), 2, dbg!(shift));
+        bits.set(24 + diffidx * (2+3*8), 2, shift);
     }
     // 3 pixels in every group, chained to the previous pixel of the same color
     /*
