@@ -38,6 +38,7 @@ path = "../jpegxl-rs"
 default-features = false
 
 [dev-dependencies]
+assert_matches = "*"
 #image = { version = "0.24.8", default-features = false, features = [
 #    "jpeg",
 #    "png",
