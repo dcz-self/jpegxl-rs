@@ -21,6 +21,7 @@ use std::{marker::PhantomData, mem::MaybeUninit, ops::Deref, ptr::null};
 
 #[allow(clippy::wildcard_imports)]
 use jpegxl_sys::encode::*;
+use jpegxl_sys::{codestream_header::{JxlExtraChannelInfo, JxlExtraChannelType}, types::JxlBool};
 
 use crate::{
     common::PixelType, errors::EncodeError, memory::MemoryManager, parallel::JxlParallelRunner,
@@ -286,15 +287,23 @@ impl JxlEncoder<'_, '_> {
 
         self.check_enc_status(unsafe { JxlEncoderSetBasicInfo(self.enc, &basic_info) })?;
         
-        let mut channel_info = unsafe {
-            let mut info = MaybeUninit::uninit();
-            // calling JxlEncoderInitExtraChannelInfo is pointless - if new fields appear in the future, then the pointer points to a too-small area of memory, guaranteeing crashes anyway.
-            info.assume_init()
+        let channel_info = JxlExtraChannelInfo {
+            type_: JxlExtraChannelType::Reserved0, // second blue
+            bits_per_sample: 10,
+            exponent_bits_per_sample: 0, // unsigned integer samples
+            dim_shift: 0, // no downsampling
+            name_length: 0, // TODO: add a name
+            alpha_associated: JxlBool::False, // not applicable
+            spot_color: [0., 0., 0., 0.], // not applicable
+            cfa_channel: 0, // not applicable
         };
-        channel_info = 
 
-        self.check_enc_status(unsafe { JxlEncoderInitExtraChannelInfo(self.enc, &basic_info) })?;
-
+        // TODO: add a name
+        //JxlEncoderSetExtraChannelName(self.enc, 0, "blue", 4);
+        self.check_enc_status(unsafe {
+            JxlEncoderSetExtraChannelInfo(self.enc, 0, &channel_info)
+        })?;
+        
         self.check_enc_status(unsafe {
             JxlEncoderSetColorEncoding(self.enc, &self.color_encoding.into())
         })
