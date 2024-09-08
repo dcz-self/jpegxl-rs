@@ -130,9 +130,9 @@ fn decode_j(j: u16, shift: u8, prev: u16) -> u16 {
     let magnitude = 0x80 << shift;
     if j != 0 {
         // This is the lossy part. 
-        if (dh!(magnitude) > dh!(prev)) | (shift == 4) {
+        if (magnitude > prev) | (shift == 4) {
             // If shift > 0 then previous pixel data gets replaced, accidental LSBs get carried from old value.
-            dh!(j << shift) | dh!(prev & !(!0 << shift))
+            (j << shift) | (prev & !(!0 << shift))
         } else {
             // If shift > 0 then the encoder dropped the LSBs
             // pretty-print for the actual difference value.
@@ -158,19 +158,19 @@ fn decode_chunk(bits: ReverseBits) -> [u16; 14] {
     out[1] = (bits.get(12, 8) as u16) << 4 | bits.get(20, 4) as u16;
     // 4 independent differential groups in every chunk
     for diffidx in 0..4 {
-        let shift = dh!(bits.get(24 + diffidx * (2+3*8), 2));
+        let shift = bits.get(24 + diffidx * (2+3*8), 2);
         let shift = 4 >> (3 - shift);
         // 3 pixels in every group, chained to the previous pixel of the same color
         for pxidx in 0..3 {
             let px_allidx = 2 + diffidx * 3 + pxidx;
             let prev = out[px_allidx - 2];
             let j = bits.get(24 + 2 + diffidx * (2 + 3 * 8) + pxidx * 8, 8) as u16;
-            let px = decode_j(dh!(j), shift, prev);
+            let px = decode_j(j, shift, prev);
             /* TODO: dcraw code does an odd thing:
              * it will read extra 4 bits for the last 2 pixels if there's all 0's in the chunk. This should send the stream out of whack.
              * The pana_bits reader strongly suggests that the stream of data is separated into 16-byte chunks, so reading another byte (or half-byte if interrupted) would contradict it.
             */
-            out[px_allidx] = dh!(px);
+            out[px_allidx] = px;
         }
     }
     out
@@ -214,8 +214,8 @@ fn encode_chunk(pxs: &[u16; 14]) -> [u8; 16] {
         for (px_diffidx, diff) in diffs.iter().enumerate() {
             let prev = outpxs[px_diffidx];
             let px = inpxs[px_diffidx + 2];
-            let j = if dh!(prev) < magnitude {
-                dh!(px >> shift)
+            let j = if prev < magnitude {
+                px >> shift
             } else {
                 ((diff + magnitude as i16) as u16) >> shift
             };
@@ -241,11 +241,11 @@ pub fn decode(data: &[u8]) -> Result<Vec<u16>>{
         let mut out = Vec::with_capacity(data.len() * 14 / 16);
         iter_chunks(data)
             .enumerate()
-            .map(|(i, data)| {
-                dh!(i);
-                let bits = ReverseBits(dh!(data));
-                let out = dh!(decode_chunk(bits));
-                compare(&data, &encode_chunk(&out));
+            .map(|(_i, data)| {
+                //dh!(i);
+                let bits = ReverseBits(data);
+                let out = decode_chunk(bits);
+                assert_eq_hex!(&data, &encode_chunk(&out));
                 out
             })
             .for_each(|chunk| out.extend_from_slice(&chunk[..]));
