@@ -224,6 +224,10 @@ fn get_shift(pxs: &[u16], anomaly: Option<u8>) -> (u8, [i16; 3]) {
 
 /// Fucking ENCODER. Because otherwise how do I reconstruct the original?
 fn encode_chunk(pxs: &[u16; 14]) -> [u8; 16] {
+    reencode_chunk(pxs, &Default::default())
+}
+
+fn reencode_chunk(pxs: &[u16; 14], shift_anomaly: &[Option<u8>; 4]) -> [u8; 16] {
     let mut bits = ReverseBits([0; 16]);
     // 2 pixels stored losslessly
     bits.set(0, 8, (pxs[0] >> 4) as u8);
@@ -234,7 +238,7 @@ fn encode_chunk(pxs: &[u16; 14]) -> [u8; 16] {
     for diffidx in 0..4 {
         let inpxs = &pxs[diffidx * 3..][..5];
         let mut outpxs = [inpxs[0], inpxs[1], 0, 0, 0];
-        let (shift, diffs) = calculate_shift(dh!(inpxs));
+        let (shift, diffs) = get_shift(dh!(inpxs), shift_anomaly[diffidx]);
         bits.set(24 + diffidx * (2+3*8), 2, cmp::min(shift, 3));
         let magnitude = 0x80 << shift;
         // 3 pixels in every group, chained to the previous pixel of the same color
@@ -404,7 +408,10 @@ mod test {
         let ar = [0x64, 0x7a, 0x92, 0xb0, 0x29, 0xe5, 0xd1, 0x89, 0x96, 0xc7, 0x5f, 0x46, 0x6f, 0x02, 0x60, 0x58];
         
         assert_eq_hex!(
-            encode_chunk(&decode_chunk(ReverseBits(ar))),
+            reencode_chunk(
+                &decode_chunk(ReverseBits(ar)),
+                &[Some(1), None, None, None],
+            ),
             ar,
         );
     }
