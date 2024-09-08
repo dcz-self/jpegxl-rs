@@ -213,6 +213,15 @@ fn calculate_shift(pxs: &[u16]) -> (u8, [i16; 3]) {
     (cmp::min(shift, dbg!(px_shift)), diffs)
 }
 
+fn get_shift(pxs: &[u16], anomaly: Option<u8>) -> (u8, [i16; 3]) {
+    let (shift, diffs) = calculate_shift(pxs);
+    let shift = match anomaly {
+        Some(shift) => shift,
+        None => shift,
+    };
+    (shift, diffs)
+}
+
 /// Fucking ENCODER. Because otherwise how do I reconstruct the original?
 fn encode_chunk(pxs: &[u16; 14]) -> [u8; 16] {
     let mut bits = ReverseBits([0; 16]);
@@ -456,7 +465,13 @@ mod test {
     fn enc_diff_shift8() {
         // (maxdiff + 1).next_power_of_two() = 80
         // diffs = [7a, 30, fffe]
-        assert_matches!(calculate_shift(&[0x586, 0x02, 0x600, 0x32, 0x5fe][..]), (1, _));
+        assert_matches!(
+            get_shift(
+                &[0x586, 0x02, 0x600, 0x32, 0x5fe][..],
+                Some(1),
+            ),
+            (1, _)
+        );
     }
     #[test]
     fn enc_diff_shift9() {
