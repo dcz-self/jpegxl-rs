@@ -2,6 +2,31 @@ use std::ops::Shl;
 
 use anyhow::Result;
 
+#[macro_export]
+macro_rules! dh {
+    // NOTE: We cannot use `concat!` to make a static string as a format argument
+    // of `eprintln!` because `file!` could contain a `{` or
+    // `$val` expression could be a block (`{ .. }`), in which case the `eprintln!`
+    // will be malformed.
+    () => {
+        eprintln!("[{}:{}:{}]", file!(), line!(), column!());
+    };
+    ($val:expr $(,)?) => {
+        // Use of `match` here is intentional because it affects the lifetimes
+        // of temporaries - https://stackoverflow.com/a/48732525/1063961
+        match $val {
+            tmp => {
+                eprintln!("[{}:{}:{}] {} = {:#x?}",
+                    file!(), line!(), column!(), stringify!($val), &tmp);
+                tmp
+            }
+        }
+    };
+    ($($val:expr),+ $(,)?) => {
+        ($($crate::dbg_hex!($val)),+,)
+    };
+}
+
 /// Converts chunk index to first byte offset within block
 fn chunk_to_offset(idx: usize) -> usize {
     if idx > 0x200 {
@@ -11,6 +36,7 @@ fn chunk_to_offset(idx: usize) -> usize {
     }
 }
 
+/// Each block of 0x4000 bytes is split into 16-byte groups. First group starts in the middle of the block, reaching the end the groups wrap back to start of the block, splitting the boundary one into two halves.
 fn block_get_chunk(data: &[u8], chunk_idx: usize) -> [u8; 16] {
     let block_idx = chunk_idx * 16 / 0x4000;
     let block = &data[block_idx * 0x4000..][..0x4000];
@@ -31,9 +57,11 @@ macro_rules! to_lsb_mask {
     };
 }
 
+#[derive(Debug, Clone)]
 struct ReverseBits([u8;16]);
 
 impl ReverseBits {
+    /// Gets up to 8 bits from the group. Starting with the last byte. Most significant bits of each byte go first into most significant bits of output. See test if this is confusing.
     fn get(&self, bit_index: usize, count: u8) -> u8 {
         let bit_index = 16*8 - bit_index - count as usize;
         let byte_index = bit_index / 8;
@@ -47,9 +75,9 @@ impl ReverseBits {
 }
 
 fn decode_chunk(bits: ReverseBits) -> [u16; 14] {
-    let mut out = [0; u16];
-    out[0] = bits.get(0, 8) << 4 | bits.get(8, 4);
-    out[1] = bits.get(12, 8) << 4 | bits.get(20, 4);
+    let mut out = [0u16; 14];
+    out[0] = (bits.get(0, 8) as u16) << 4 | bits.get(8, 4) as u16;
+    out[1] = (bits.get(12, 8) as u16) << 4 | bits.get(20, 4) as u16;
     for diffidx in 0..4 {
         let shift = 4 >> (3 - bits.get(24 + diffidx * 18, 2));
         let magnitude = 0x80 << shift;
@@ -57,14 +85,19 @@ fn decode_chunk(bits: ReverseBits) -> [u16; 14] {
             let px_allidx = 2 + diffidx * 3 + pxidx;
             let prev = out[px_allidx - 2];
             let j = bits.get(24 + diffidx * 18 + pxidx * 8, 8) as u16;
-            let px = if magnitude > prev | shift == 4 {
-                j << shift | prev & !(!0 << shift)
+            let px = if j != 0 {
+                if (magnitude > prev) | (shift == 4) {
+                    j << shift | prev & !(!0 << shift)
+                } else {
+                    prev - magnitude + j
+                }
             } else {
-                prev - magnitude + j
+                prev
             };
             out[px_allidx] = px;
         }
     }
+    out
 }
 
 pub fn decode(data: &[u8]) -> Result<()>{
@@ -90,9 +123,19 @@ mod test {
     
     #[test]
     fn cto() {
-    assert_eq!(chunk_to_offset(0), 0x1ff8);
-    assert_eq!(chunk_to_offset(0x200), 0x3ff8);
-    assert_eq!(chunk_to_offset(0x201), 0x8);
-    assert_eq!(chunk_to_offset(0x3ff), 0x1fe8);
+        assert_eq!(chunk_to_offset(0), 0x1ff8);
+        assert_eq!(chunk_to_offset(0x200), 0x3ff8);
+        assert_eq!(chunk_to_offset(0x201), 0x8);
+        assert_eq!(chunk_to_offset(0x3ff), 0x1fe8);
+    }
+    
+    #[test]
+    fn decode() {
+        let ar = ReverseBits([0x90, 0x7A, 0x8A, 0x18, 0x02, 0x26, 0x92, 0xC7, 0xB7, 0x48, 0x20, 0x1F, 0x20, 0xC6, 0xF0, 0x0B]);
+        assert_eq!(
+            decode_chunk(ar.clone()),
+            [0xbf, 0xc6, 0xbf, 0xc2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            "{:#x?}", &decode_chunk(ar)
+        );
     }
 }
