@@ -101,7 +101,7 @@ pub struct ReverseBits(pub [u8;16]);
 impl ReverseBits {
     /// Gets up to 8 bits from the group. Starting with the last byte. Most significant bits of each byte go first into most significant bits of output. See test if this is confusing.
     pub fn get(&self, bit_index: usize, count: u8) -> u8 {
-        let (data, byte_index, bit_offset) = self.get_internal(bit_index, count);
+        let (data, _byte_index, bit_offset) = self.get_internal(bit_index, count);
         let mask = !(!0u16 << count) as u8;
         (data >> bit_offset) as u8 & mask
     }
@@ -187,8 +187,11 @@ fn calculate_shift(pxs: &[u16]) -> (u8, [i16; 3]) {
         .zip(diffs.iter_mut())
         .for_each(|(d, o)| *o = d);
     let maxdiff = dh!(diffs).iter().map(|d| d.abs() as u16).max().unwrap();
-    let maxpx = pxs[2..5].iter().max().unwrap();
-    let px_shift = [2, 1, 0].into_iter()
+    // Quirk: maxpx could check only 2..5.
+    // The protocol never lossily encodes the initial 2 pixels.
+    // Still, this way matches what the TZ-101 emits.
+    let maxpx = dh!(&pxs[0..5]).iter().max().unwrap();
+    let px_shift = (0..3)
         .filter(|shift| (0xffu16 << shift) > *maxpx)
         .next()
         .unwrap_or(4);
@@ -199,7 +202,7 @@ fn calculate_shift(pxs: &[u16]) -> (u8, [i16; 3]) {
         2 => 2,
         _ => 4,
     }; // if we tried to encode 4, then: 4 >> 3.saturating_sub((mag>>8) .neg().trailing_zeros())
-    (cmp::min(shift, px_shift), diffs)
+    (cmp::min(shift, dbg!(px_shift)), diffs)
 }
 
 /// Fucking ENCODER. Because otherwise how do I reconstruct the original?
@@ -360,7 +363,18 @@ mod test {
     
     #[test]
     fn reencode3() {
+        // shift=4 and replace mode not triggered automatically
         let ar = [0x74, 0x89, 0x7f, 0xb0, 0x01, 0x1e, 0x52, 0x58, 0x57, 0x89, 0xa0, 0x6b, 0xf4, 0x01, 0xd0, 0x11];
+        
+        assert_eq_hex!(
+            encode_chunk(&decode_chunk(ReverseBits(ar))),
+            ar,
+        );
+    }
+    
+    #[test]
+    fn reencode4() {
+        let ar = [0x7c, 0x7b, 0x8f, 0x40, 0xc6, 0xe9, 0xc1, 0xa8, 0x67, 0x48, 0xa4, 0x40, 0x24, 0x02, 0xa0, 0x0b];
         
         assert_eq_hex!(
             encode_chunk(&decode_chunk(ReverseBits(ar))),
@@ -388,8 +402,7 @@ mod test {
         // raw mag = 0x400, shift = 4
         //diffs = [170, 3b4, fff8]
         // j recalculation does not overflow when shift is reduced
-        // how does it even succeed with shift=2? 0x3b4 is > 0x200
-        // but 0xff << 2 = 0x3fc so ok in replacement mode
+        // 
         assert_matches!(calculate_shift(&[0x159, 0x01, 0x2c9, 0x3b5, 0x2c1][..]), (2, _));
     }
     #[test]
@@ -399,7 +412,8 @@ mod test {
     }
     #[test]
     fn enc_diff_shift6() {
-        // raw mag = 0x200
+        // (maxdiff + 1).next_power_of_two() = 200
+        // px_shift = 1..?
         assert_matches!(calculate_shift(&[0x2d8, 0x128, 0x1b4, 0xf0, 0x174][..]), (2, _));
     }
     #[test]
