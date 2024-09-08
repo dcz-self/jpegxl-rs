@@ -22,8 +22,12 @@ pedantic = "warn"
 vendored = ["jpegxl-rs/vendored"]
 
 [dependencies]
+anyhow = "1.0"
 derive_builder = "0.20.0"
 #image = { version = "0.24.8", optional = true, default-features = false }
+libopenraw = { version = "0.4.0-alpha.3", default-features = false }
+log = "*"
+simple_logger = "*"
 thiserror = "1.0.56"
 half = "2.4.0"
 byteorder = "1.5.0"
