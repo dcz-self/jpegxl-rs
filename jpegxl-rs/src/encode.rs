@@ -287,6 +287,7 @@ impl JxlEncoder<'_, '_> {
 
         self.check_enc_status(unsafe { JxlEncoderSetBasicInfo(self.enc, &basic_info) })?;
         
+        /*
         let channel_info = JxlExtraChannelInfo {
             type_: JxlExtraChannelType::Reserved0, // second blue
             bits_per_sample: 10,
@@ -302,7 +303,7 @@ impl JxlEncoder<'_, '_> {
         //JxlEncoderSetExtraChannelName(self.enc, 0, "blue", 4);
         self.check_enc_status(unsafe {
             JxlEncoderSetExtraChannelInfo(self.enc, 0, &channel_info)
-        })?;
+        })?;*/
         
         self.check_enc_status(unsafe {
             JxlEncoderSetColorEncoding(self.enc, &self.color_encoding.into())
