@@ -62,21 +62,39 @@ struct ReverseBits([u8;16]);
 
 impl ReverseBits {
     /// Gets up to 8 bits from the group. Starting with the last byte. Most significant bits of each byte go first into most significant bits of output. See test if this is confusing.
-    fn get(&self, bit_index: usize, count: u8) -> u8 {
-        let bit_index = 16*8 - dbg!(bit_index) - count as usize;
+    pub fn get(&self, bit_index: usize, count: u8) -> u8 {
+        let (data, byte_index, bit_offset) = self.get_internal(bit_index, count);
+        let mask = !(!0u16 << count) as u8;
+        (data >> bit_offset) as u8 & mask
+    }
+    
+    fn get_internal(&self, bit_index: usize, count: u8) -> (u16, usize, usize) {
+        let bit_index = 16*8 - bit_index - count as usize;
         let byte_index = bit_index / 8;
         let data
             = (*self.0.get(byte_index + 1).unwrap_or(&0) as u16) << 8
             | self.0[byte_index] as u16;
         let bit_offset = bit_index % 8;
-        let mask = !(!0u16 << count) as u8;
-        dh!((data >> bit_offset) as u8 & mask)
+        (data, byte_index, bit_offset)
+    }
+    
+    pub fn set(&mut self, bit_index: usize, count: u8, value: u8) {
+        let (data, byte_index, bit_offset) = self.get_internal(bit_index, count);
+        let value = (value as u16) << bit_offset;
+        let mask = !(!0u16 << count) << bit_offset;
+        let data = ((data & !mask) | value).to_be_bytes();
+        self.0.get_mut(byte_index + 1)
+            .map(|v| *v = data[0]);
+        self.0[byte_index] = data[1];
     }
 }
 
 fn decode_chunk(bits: ReverseBits) -> [u16; 14] {
     /* This is written in a non-streaming, immutable fashion: every access to bits calculates the position again.
      * The advantage is that the input data will never get globally out of sync when some data accidentally gets digested (although ReverseBits being bounded already controls that to an extent). The cost is all the indexing multipliers.
+     * 
+     * To convert to a correct streaming version, make sure that no stream read operations are conditional. The format doesn't call for it: the stream is always the same size and shape.
+     * Conversion should be easy, it's already this way anyway.
     */
     let mut out = [0u16; 14];
     // 2 pixels stored losslessly
@@ -104,10 +122,18 @@ fn decode_chunk(bits: ReverseBits) -> [u16; 14] {
             } else {
                 prev
             };
+            /* TODO: dcraw code does an odd thing:
+             * it will read extra 4 bits for the last 2 pixels if there's all 0's in the chunk. This should send the stream out of whack.
+             * The pana_bits reader strongly suggests that the stream of data is separated into 16-byte chunks, so reading another byte (or half-byte if interrupted) would contradict it.
+            */
             out[px_allidx] = px;
         }
     }
     out
+}
+
+fn encode_chunk(data: &[u16; 14]) -> [u8; 16] {
+    todo!();
 }
 
 pub fn decode(data: &[u8]) -> Result<()>{
@@ -132,6 +158,23 @@ mod test {
         assert_eq!(ar.get(12, 8), 0x0c);
         assert_eq!(ar.get(20, 4), 0x6);
         assert_eq!(ar.get(24, 2), 0x0);
+        assert_eq!(ar.get(26, 8), 0x80);
+    }
+    
+    #[test]
+    fn revset() {
+        let mut ar = ReverseBits([0;16]);
+        ar.set(0, 8, 0x0b);
+        assert_eq!(ar.get(0, 8), 0x0b);
+        ar.set(8, 4, 0xf);
+        assert_eq!(ar.get(8, 4), 0xf);
+        ar.set(12, 8, 0x0c);
+        assert_eq!(ar.get(12, 8), 0x0c);
+        ar.set(20, 4, 0x6);
+        assert_eq!(ar.get(20, 4), 0x6);
+        ar.set(24, 2, 0x0);
+        assert_eq!(ar.get(24, 2), 0x0);
+        ar.set(26, 8, 0x80);
         assert_eq!(ar.get(26, 8), 0x80);
     }
     
