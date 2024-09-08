@@ -146,7 +146,7 @@ fn decode_chunk(bits: ReverseBits) -> [u16; 14] {
         for pxidx in 0..3 {
             let px_allidx = 2 + diffidx * 3 + pxidx;
             let prev = out[px_allidx - 2];
-            let j = dh!(bits.get(24 + 2 + diffidx * (2 + 3 * 8) + pxidx * 8, 8)) as u16;
+            let j = bits.get(24 + 2 + diffidx * (2 + 3 * 8) + pxidx * 8, 8) as u16;
             let px = if j != 0 {
                 // This is the lossy part. 
                 if (magnitude > prev) | (shift == 4) {
@@ -154,6 +154,7 @@ fn decode_chunk(bits: ReverseBits) -> [u16; 14] {
                     j << shift | prev & !(!0 << shift)
                 } else {
                     // If shift > 0 then the encoder dropped the LSBs
+                    dh!((j << shift) as i16 - magnitude as i16);
                     prev - magnitude + j << shift
                 }
             } else {
@@ -175,7 +176,7 @@ fn calculate_shift(pxs: &[u16]) -> u8 {
     dh!(&pxs[..5]);
     pxs[..3].iter()
         .zip(pxs[2..][..3].iter())
-        .map(|(p, n)| *p as i16 - *n as i16)
+        .map(|(p, n)| *n as i16 - *p as i16)
         .zip(diffs.iter_mut())
         .for_each(|(d, o)| *o = d);
     dh!(diffs);
@@ -186,7 +187,7 @@ fn calculate_shift(pxs: &[u16]) -> u8 {
         1 => 1,
         2 => 2,
         _ => 4,
-    }
+    }// 4 >> 3.saturating_sub( .neg().trailing_zeros())
 }
 
 /// Fucking ENCODER. Because otherwise how do I reconstruct the original?
@@ -200,22 +201,7 @@ fn encode_chunk(pxs: &[u16; 14]) -> [u8; 16] {
     // 4 independent differential groups in every chunk
     for diffidx in 0..4 {
         let mut outpx = [pxs[diffidx * 3], pxs[diffidx * 3 + 1], 0, 0, 0];
-        let mut diffs = [0; 3];
-        dh!(&pxs[diffidx * 3..][..5]);
-        pxs[diffidx * 3..][..3].iter()
-            .zip(pxs[diffidx * 3 + 2..][..3].iter())
-            .map(|(p, n)| *p as i16 - *n as i16)
-            .zip(diffs.iter_mut())
-            .for_each(|(d, o)| *o = d);
-        dh!(diffs);
-        let maxdiff = diffs.iter().map(|d| d.abs() as u16).max().unwrap();
-        let magnitude = dh!(dh!(maxdiff).next_power_of_two());
-        let shift = match magnitude >> 7 {
-            0 => 0,
-            1 => 1,
-            2 => 2,
-            _ => 4,
-        }; // 4 >> 3.saturating_sub( .neg().trailing_zeros())
+        let shift = calculate_shift(&pxs[diffidx * 3..][..5]);
         /*let magnitude = 0x80 << shift;
         if prev < mag {
             enc = (diff + magnitude) >> shift;
