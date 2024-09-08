@@ -44,6 +44,7 @@ pub fn build() {
         .define("JPEGXL_ENABLE_EXAMPLES", "OFF")
         .define("JPEGXL_ENABLE_JNI", "OFF")
         .define("JPEGXL_ENABLE_SJPEG", "OFF")
+        .define("JPEGXL_ENABLE_SKCMS", "OFF")
         .define("JPEGXL_ENABLE_OPENEXR", "OFF")
         .define("JPEGXL_ENABLE_JPEGLI", "OFF")
         .define("JPEGXL_BUNDLE_LIBPNG", "OFF");
@@ -66,22 +67,21 @@ pub fn build() {
     }
 
     let mut prefix = config.build();
-    prefix.push("lib");
+    prefix.push("lib64");
     println!("cargo:rustc-link-search=native={}", prefix.display());
     prefix.pop();
     prefix.push("lib64");
     println!("cargo:rustc-link-search=native={}", prefix.display());
-
     println!("cargo:rustc-link-lib=static=jxl");
     println!("cargo:rustc-link-lib=static=jxl_cms");
 
     #[cfg(feature = "threads")]
     println!("cargo:rustc-link-lib=static=jxl_threads");
 
-    println!("cargo:rustc-link-lib=static=hwy");
-    println!("cargo:rustc-link-lib=static=brotlicommon");
-    println!("cargo:rustc-link-lib=static=brotlidec");
-    println!("cargo:rustc-link-lib=static=brotlienc");
+    println!("cargo:rustc-link-lib=hwy");
+    println!("cargo:rustc-link-lib=brotlicommon");
+    println!("cargo:rustc-link-lib=brotlidec");
+    println!("cargo:rustc-link-lib=brotlienc");
 
     #[cfg(feature = "threads")]
     {
