@@ -1,4 +1,5 @@
 use anyhow::{Error, Result};
+use std::cmp;
 
 #[macro_export]
 macro_rules! dh {
@@ -132,13 +133,13 @@ fn decode_j(j: u16, shift: u8, prev: u16) -> u16 {
         // This is the lossy part. 
         if (magnitude > prev) | (shift == 4) {
             // If shift > 0 then previous pixel data gets replaced, accidental LSBs get carried from old value.
-            (j << shift) | (prev & !(!0 << shift))
+            (dh!(j) << shift) | (prev & !(!0 << shift))
         } else {
             // If shift > 0 then the encoder dropped the LSBs
             // pretty-print for the actual difference value.
             // I'm not using this exact calculation to stay in u16
             // dh!((j << shift) as i16 - magnitude as i16);
-            prev - magnitude + (j << shift)
+            prev - magnitude + (dh!(j) << shift)
         }
     } else {
         prev
@@ -158,14 +159,14 @@ fn decode_chunk(bits: ReverseBits) -> [u16; 14] {
     out[1] = (bits.get(12, 8) as u16) << 4 | bits.get(20, 4) as u16;
     // 4 independent differential groups in every chunk
     for diffidx in 0..4 {
-        let shift = bits.get(24 + diffidx * (2+3*8), 2);
+        let shift = dbg!(bits.get(24 + diffidx * (2+3*8), 2));
         let shift = 4 >> (3 - shift);
         // 3 pixels in every group, chained to the previous pixel of the same color
         for pxidx in 0..3 {
             let px_allidx = 2 + diffidx * 3 + pxidx;
-            let prev = out[px_allidx - 2];
+            let prev = dh!(out[px_allidx - 2]);
             let j = bits.get(24 + 2 + diffidx * (2 + 3 * 8) + pxidx * 8, 8) as u16;
-            let px = decode_j(j, shift, prev);
+            let px = decode_j(dh!(j), dbg!(shift), dh!(prev));
             /* TODO: dcraw code does an odd thing:
              * it will read extra 4 bits for the last 2 pixels if there's all 0's in the chunk. This should send the stream out of whack.
              * The pana_bits reader strongly suggests that the stream of data is separated into 16-byte chunks, so reading another byte (or half-byte if interrupted) would contradict it.
@@ -184,13 +185,13 @@ fn calculate_shift(pxs: &[u16]) -> (u8, [i16; 3]) {
         .map(|(p, n)| *n as i16 - *p as i16)
         .zip(diffs.iter_mut())
         .for_each(|(d, o)| *o = d);
-    let maxdiff = diffs.iter().map(|d| d.abs() as u16).max().unwrap();
-    let magnitude = (maxdiff+1).next_power_of_two();
+    let maxdiff = dh!(diffs).iter().map(|d| d.abs() as u16).max().unwrap();
+    let magnitude = dh!((maxdiff+1).next_power_of_two());
     let shift = match magnitude >> 8 {
         0 => 0,
         1 => 1,
         2 => 2,
-        _ => 2, // decoder has space for 4, but the TZ-101 doesn't use it
+        _ => 4, // decoder has space for 4, but the TZ-101 doesn't use it
     }; // if we tried to encode 4, then: 4 >> 3.saturating_sub((mag>>8) .neg().trailing_zeros())
     (shift, diffs)
 }
@@ -207,20 +208,20 @@ fn encode_chunk(pxs: &[u16; 14]) -> [u8; 16] {
     for diffidx in 0..4 {
         let inpxs = &pxs[diffidx * 3..][..5];
         let mut outpxs = [inpxs[0], inpxs[1], 0, 0, 0];
-        let (shift, diffs) = calculate_shift(inpxs);
-        bits.set(24 + diffidx * (2+3*8), 2, shift);
+        let (shift, diffs) = calculate_shift(dh!(inpxs));
+        bits.set(24 + diffidx * (2+3*8), 2, cmp::min(shift, 3));
         let magnitude = 0x80 << shift;
         // 3 pixels in every group, chained to the previous pixel of the same color
         for (px_diffidx, diff) in diffs.iter().enumerate() {
             let prev = outpxs[px_diffidx];
             let px = inpxs[px_diffidx + 2];
-            let j = if prev < magnitude {
+            let j = if dh!(prev) < magnitude {
                 px >> shift
             } else {
                 ((diff + magnitude as i16) as u16) >> shift
             };
             bits.set(24 + 2 + diffidx * (2 + 3 * 8) + px_diffidx * 8, 8, j as u8);
-            outpxs[px_diffidx + 2] = decode_j(j, shift, prev);
+            outpxs[px_diffidx + 2] = decode_j(dh!(j), dbg!(shift), dh!(prev));
         }
     }
     bits.0
@@ -241,9 +242,9 @@ pub fn decode(data: &[u8]) -> Result<Vec<u16>>{
         let mut out = Vec::with_capacity(data.len() * 14 / 16);
         iter_chunks(data)
             .enumerate()
-            .map(|(_i, data)| {
-                //dh!(i);
-                let bits = ReverseBits(data);
+            .map(|(i, data)| {
+                dh!(i);
+                let bits = ReverseBits(dh!(data));
                 let out = decode_chunk(bits);
                 assert_eq_hex!(&data, &encode_chunk(&out));
                 out
@@ -330,6 +331,15 @@ mod test {
             ar,
         );
     }
+    #[test]
+    fn reencode1() {
+        let ar = [0x21, 0x16, 0x47, 0x8f, 0x2d, 0x09, 0xa1, 0x26, 0x29, 0x6c, 0x61, 0x17, 0x30, 0xaf, 0xd3, 0x17];
+        
+        assert_eq_hex!(
+            encode_chunk(&decode_chunk(ReverseBits(ar))),
+            ar,
+        );
+    }
     
     #[test]
     fn enc_diff_shift() {
@@ -360,5 +370,10 @@ mod test {
     fn enc_diff_shift6() {
         // raw mag = 0x200
         assert_matches!(calculate_shift(&[0x2d8, 0x128, 0x1b4, 0xf0, 0x174][..]), (2, _));
+    }
+    #[test]
+    fn enc_diff_shift7() {
+        // raw mag = 0x400
+        assert_matches!(calculate_shift(&[0x407, 0x1ef, 0x477, 0x16f, 0x217][..]), (4, _));
     }
 }
