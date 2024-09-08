@@ -18,6 +18,9 @@ missing_docs = "warn"
 [lints.clippy]
 pedantic = "warn"
 
+[features]
+vendored = ["jpegxl-rs/vendored"]
+
 [dependencies]
 derive_builder = "0.20.0"
 #image = { version = "0.24.8", optional = true, default-features = false }
