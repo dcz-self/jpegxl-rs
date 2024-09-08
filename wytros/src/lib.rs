@@ -2,6 +2,29 @@ use std::ops::Shl;
 
 use anyhow::Result;
 
+/// Converts chunk index to first byte offset within block
+fn chunk_to_offset(idx: usize) -> usize {
+    if idx > 0x200 {
+        idx * 16 - 0x2008
+    } else {
+        idx * 16 + 0x1ff8
+    }
+}
+
+fn block_get_chunk(data: &[u8], chunk_idx: usize) -> [u8; 16] {
+    let block_idx = chunk_idx * 16 / 0x4000;
+    let block = &data[block_idx * 0x4000..][..0x4000];
+    let chunks_in_block = 0x4000 / 16;
+    let chunk_idx = chunk_idx % chunks_in_block;
+    let data_offset = chunk_to_offset(chunk_idx);
+    let mut out = [0; 16];
+    if data_offset == 0x3ff8 {
+        out[0..8].copy_from_slice(&block[data_offset..][..8]);
+        out[8..16].copy_from_slice(&block[0..8]);
+    }
+    out
+}
+
 struct ReverseBits([u8;16]);
 
 impl ReverseBits {
@@ -36,5 +59,13 @@ mod test {
         assert_eq!(ar.get(8, 4), 0xf);
         assert_eq!(ar.get(12, 8), 0x0c);
         assert_eq!(ar.get(20, 4), 0x6);
+    }
+    
+    #[test]
+    fn cto() {
+    assert_eq!(chunk_to_offset(0), 0x1ff8);
+    assert_eq!(chunk_to_offset(0x200), 0x3ff8);
+    assert_eq!(chunk_to_offset(0x201), 0x8);
+    assert_eq!(chunk_to_offset(0x3ff), 0x1fe8);
     }
 }
