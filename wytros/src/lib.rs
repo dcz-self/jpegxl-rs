@@ -182,7 +182,7 @@ fn calculate_shift(pxs: &[u16]) -> u8 {
     dh!(diffs);
     let maxdiff = diffs.iter().map(|d| d.abs() as u16).max().unwrap();
     let magnitude = dh!(dh!(maxdiff).next_power_of_two());
-    match magnitude >> 7 {
+    match magnitude >> 8 {
         0 => 0,
         1 => 1,
         2 => 2,
@@ -239,7 +239,7 @@ pub fn decode(data: &[u8]) -> Result<Vec<u16>>{
             .map(|(i, data)| {
                 dh!(i);
                 let bits = ReverseBits(dh!(data));
-                let out = decode_chunk(bits);
+                let out = dh!(decode_chunk(bits));
                 compare(&data, &encode_chunk(&out));
                 out
             })
