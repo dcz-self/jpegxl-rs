@@ -63,7 +63,7 @@ struct ReverseBits([u8;16]);
 impl ReverseBits {
     /// Gets up to 8 bits from the group. Starting with the last byte. Most significant bits of each byte go first into most significant bits of output. See test if this is confusing.
     fn get(&self, bit_index: usize, count: u8) -> u8 {
-        let bit_index = 16*8 - bit_index - count as usize;
+        let bit_index = 16*8 - dbg!(bit_index) - count as usize;
         let byte_index = bit_index / 8;
         let data
             = (*self.0.get(byte_index + 1).unwrap_or(&0) as u16) << 8
@@ -79,12 +79,13 @@ fn decode_chunk(bits: ReverseBits) -> [u16; 14] {
     out[0] = (bits.get(0, 8) as u16) << 4 | bits.get(8, 4) as u16;
     out[1] = (bits.get(12, 8) as u16) << 4 | bits.get(20, 4) as u16;
     for diffidx in 0..4 {
-        let shift = 4 >> (3 - bits.get(24 + diffidx * 18, 2));
+        let shift = bits.get(24 + diffidx * (2+3*8), 2);
+        let shift = 4 >> (3 - shift);
         let magnitude = 0x80 << shift;
         for pxidx in 0..3 {
             let px_allidx = 2 + diffidx * 3 + pxidx;
             let prev = out[px_allidx - 2];
-            let j = bits.get(24 + diffidx * 18 + pxidx * 8, 8) as u16;
+            let j = bits.get(24 + 2 + diffidx * (2 + 3 * 8) + pxidx * 8, 8) as u16;
             let px = if j != 0 {
                 if (magnitude > prev) | (shift == 4) {
                     j << shift | prev & !(!0 << shift)
@@ -114,11 +115,15 @@ mod test {
         ar[15] = 0x0b;
         ar[14] = 0xf0;
         ar[13] = 0xc6;
+        ar[12] = 0x20;
+        ar[11] = 0x1f;
         let ar = ReverseBits(ar);
         assert_eq!(ar.get(0, 8), 0x0b);
         assert_eq!(ar.get(8, 4), 0xf);
         assert_eq!(ar.get(12, 8), 0x0c);
         assert_eq!(ar.get(20, 4), 0x6);
+        assert_eq!(ar.get(24, 2), 0x0);
+        assert_eq!(ar.get(26, 8), 0x80);
     }
     
     #[test]
@@ -132,10 +137,11 @@ mod test {
     #[test]
     fn decode() {
         let ar = ReverseBits([0x90, 0x7A, 0x8A, 0x18, 0x02, 0x26, 0x92, 0xC7, 0xB7, 0x48, 0x20, 0x1F, 0x20, 0xC6, 0xF0, 0x0B]);
+        let pixels = decode_chunk(ar);
         assert_eq!(
-            decode_chunk(ar.clone()),
-            [0xbf, 0xc6, 0xbf, 0xc2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-            "{:#x?}", &decode_chunk(ar)
+            pixels,
+            [0xbf, 0xc6, 0xbf, 0xc2, 0xc0, 0xcd, 0xbc, 0xc6, 0xc5, 0xc6, 0xcb, 0xd0, 0xc5, 0xe0],
+            "{:#x?}", &pixels,
         );
     }
 }
