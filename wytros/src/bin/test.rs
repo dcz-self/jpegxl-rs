@@ -1,3 +1,4 @@
+/*! Generate a test pattern */
 use anyhow::Result;
 use jpegxl_rs as jxl;
 use libopenraw::{rawfile_from_file, Bitmap, CfaPattern, Image, RenderingOptions};
@@ -68,13 +69,13 @@ fn run() -> Result<()> {
         for i in 0..(width as usize) {
             swizzled.extend_from_slice(
                 &if i < width / 4 {
-                    [1024<<5,0,0,1<<15]
+                    [1024<<5,0,0]//,1<<15]
                 } else if i < width / 2 {
-                    [0,1024<<5,0,1<<15]
+                    [0,1024<<5,0]//,1<<15]
                 } else if i < 3 * width / 4 {
-                    [0,0, 1024<<5,1<<15]
+                    [0,0, 1024<<5]//,1<<15]
                 } else {
-                    [1024,0,0,1<<15]
+                    [1024,0,0]//,1<<15]
                 }[..]
                 //&[1<<15, 0,0, 1 << 15]
             );
@@ -99,10 +100,10 @@ fn run() -> Result<()> {
         // I don't know what it changes apart from color profile in metadata anyway
         .color_encoding(jxl::encode::ColorEncoding::LinearSrgb)
         // this should be carried in a channel other than alpha, but let's use what's there for now
-        .has_alpha(true)
+        //.has_alpha(true)
         .build()?;
 
-    let frame = jxl::encode::EncoderFrame::new(&swizzled[..]).num_channels(4);
+    let frame = jxl::encode::EncoderFrame::new(&swizzled[..]).num_channels(3);
     let encoded = enc.encode_frame::<u16, u16>(&frame, width as u32, height as u32)?;
     let mut out = File::create("/mnt/space/rhn/out.jxl")?;
     out.write_all(&encoded)?;

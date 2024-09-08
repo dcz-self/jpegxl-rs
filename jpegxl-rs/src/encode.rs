@@ -21,7 +21,7 @@ use std::{marker::PhantomData, mem::MaybeUninit, ops::Deref, ptr::null};
 
 #[allow(clippy::wildcard_imports)]
 use jpegxl_sys::encode::*;
-use jpegxl_sys::{codestream_header::{JxlExtraChannelInfo, JxlExtraChannelType}, types::JxlBool};
+use jpegxl_sys::{codestream_header::{JxlExtraChannelInfo, JxlExtraChannelType}, types::{JxlBitDepth, JxlBitDepthType, JxlBool}};
 
 use crate::{
     common::PixelType, errors::EncodeError, memory::MemoryManager, parallel::JxlParallelRunner,
@@ -208,6 +208,16 @@ impl JxlEncoder<'_, '_> {
         self.check_enc_status(unsafe { JxlEncoderUseContainer(self.enc, self.use_container) })?;
         self.check_enc_status(unsafe {
             JxlEncoderSetFrameLossless(self.options_ptr, self.lossless)
+        })?;
+        self.check_enc_status(unsafe {
+            JxlEncoderSetFrameBitDepth(
+                self.options_ptr,
+                &JxlBitDepth {
+                    type_: JxlBitDepthType::BitDepthFromCodestream,
+                    bits_per_sample: 12,
+                    exponent_bits_per_sample: 0,
+                }
+            )
         })?;
         self.check_enc_status(unsafe {
             JxlEncoderFrameSettingsSetOption(
@@ -456,7 +466,7 @@ impl<'prl, 'mm> JxlEncoder<'prl, 'mm> {
         self.add_jpeg_frame(data)?;
         self.start_encoding()
     }
-
+    
     /// Encode a JPEG XL image from pixels
     ///
     /// Note: Use RGB(3) channels, native endianness and no alignment.
@@ -470,7 +480,25 @@ impl<'prl, 'mm> JxlEncoder<'prl, 'mm> {
         width: u32,
         height: u32,
     ) -> Result<EncoderResult<U>, EncodeError> {
-        self.setup_encoder(width, height, U::bits_per_sample(), self.has_alpha)?;
+        let (bits, exponent) = U::bits_per_sample();
+        self.encode_with_bit_depth(data, width, height, (bits, exponent))
+    }
+    
+    /// Encode a JPEG XL image from pixels
+    ///
+    /// Note: Use RGB(3) channels, native endianness and no alignment.
+    /// Ignore alpha channel settings
+    ///
+    /// # Errors
+    /// Return [`EncodeError`] if the internal encoder fails to encode
+    pub fn encode_with_bit_depth<T: PixelType, U: PixelType>(
+        &mut self,
+        data: &[T],
+        width: u32,
+        height: u32,
+        (bits_per_sample, exponent_bits_per_sample): (u32, u32),
+    ) -> Result<EncoderResult<U>, EncodeError> {
+        self.setup_encoder(width, height, (bits_per_sample, exponent_bits_per_sample), self.has_alpha)?;
         self.add_frame(&EncoderFrame::new(data))?;
         self.start_encoding::<U>()
     }
@@ -486,7 +514,22 @@ impl<'prl, 'mm> JxlEncoder<'prl, 'mm> {
         width: u32,
         height: u32,
     ) -> Result<EncoderResult<U>, EncodeError> {
-        self.setup_encoder(width, height, U::bits_per_sample(), self.has_alpha)?;
+        let (bits, exponent) = U::bits_per_sample();
+        self.encode_frame_with_bit_depth(frame, width, height, (bits, exponent))
+    }
+    /// Encode a JPEG XL image from a frame.
+    /// See [`EncoderFrame`] for custom options of the original pixels.
+    ///
+    /// # Errors
+    /// Return [`EncodeError`] if the internal encoder fails to encode
+    pub fn encode_frame_with_bit_depth<T: PixelType, U: PixelType>(
+        &mut self,
+        frame: &EncoderFrame<T>,
+        width: u32,
+        height: u32,
+        (bits_per_sample, exponent_bits_per_sample): (u32, u32),
+    ) -> Result<EncoderResult<U>, EncodeError> {
+        self.setup_encoder(width, height, (bits_per_sample, exponent_bits_per_sample), self.has_alpha)?;
         self.add_frame(frame)?;
         self.start_encoding::<U>()
     }

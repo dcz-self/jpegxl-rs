@@ -71,9 +71,9 @@ pub enum JxlBitDepthType {
 #[repr(C)]
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct JxlBitDepth {
-    type_: JxlBitDepthType,
-    bits_per_sample: u32,
-    exponent_bits_per_sample: u32,
+    pub type_: JxlBitDepthType,
+    pub bits_per_sample: u32,
+    pub exponent_bits_per_sample: u32,
 }
 
 #[repr(transparent)]
