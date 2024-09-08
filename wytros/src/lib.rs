@@ -151,7 +151,7 @@ fn decode_chunk(bits: ReverseBits) -> [u16; 14] {
                 // This is the lossy part. 
                 if (magnitude > prev) | (shift == 4) {
                     // If shift > 0 then previous pixel data gets replaced, accidental LSBs get carried from old value.
-                    j << shift | prev & !(!0 << shift)
+                    dh!(j << shift) | dh!(prev & !(!0 << shift))
                 } else {
                     // If shift > 0 then the encoder dropped the LSBs
                     dh!((j << shift) as i16 - magnitude as i16);
@@ -182,6 +182,11 @@ fn calculate_shift(pxs: &[u16]) -> u8 {
     dh!(diffs);
     let maxdiff = diffs.iter().map(|d| d.abs() as u16).max().unwrap();
     let magnitude = dh!((dh!(maxdiff)+1).next_power_of_two());
+    let magnitude = if pxs.iter().any(|p| magnitude > *p) {
+        magnitude >> 1
+    } else {
+        magnitude
+    };
     match magnitude >> 8 {
         0 => 0,
         1 => 1,
@@ -324,5 +329,7 @@ mod test {
         assert_eq!(calculate_shift(&[0xbc, 0xc6, 0xc5, 0xc6, 0xcb][..]), 0);
         assert_eq!(calculate_shift(&[0xc6, 0xcb, 0xd0, 0xc5, 0xe0][..]), 0);
         assert_eq!(calculate_shift(&[0x3c1, 0x312, 0x3a9, 0x2f7, 0x3f1][..]), 0);
+        assert_eq!(calculate_shift(&[0x159, 0x01, 0x2c9, 0x3b5, 0x2c1][..]), 2);
+        
     }
 }
