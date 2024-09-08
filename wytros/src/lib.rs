@@ -70,7 +70,7 @@ impl ReverseBits {
             | self.0[byte_index] as u16;
         let bit_offset = bit_index % 8;
         let mask = !(!0u16 << count) as u8;
-        (data >> bit_offset) as u8 & mask
+        dh!((data >> bit_offset) as u8 & mask)
     }
 }
 
