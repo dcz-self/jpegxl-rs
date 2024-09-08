@@ -182,17 +182,13 @@ fn calculate_shift(pxs: &[u16]) -> u8 {
     dh!(diffs);
     let maxdiff = diffs.iter().map(|d| d.abs() as u16).max().unwrap();
     let magnitude = dh!((dh!(maxdiff)+1).next_power_of_two());
-    let magnitude = if pxs[2..].iter().filter(|p| magnitude > **p).count() > 2 {
-        magnitude >> 1
-    } else {
-        magnitude
-    };
     match magnitude >> 8 {
         0 => 0,
         1 => 1,
         2 => 2,
-        _ => 4,
-    }// 4 >> 3.saturating_sub( .neg().trailing_zeros())
+        _ => 2, // decoder has space for 4, but the TZ-101 doesn't use it
+    }
+    // if we tried to encode 4, then: 4 >> 3.saturating_sub((mag>>8) .neg().trailing_zeros())
 }
 
 /// Fucking ENCODER. Because otherwise how do I reconstruct the original?
@@ -336,11 +332,28 @@ mod test {
         assert_eq!(calculate_shift(&[0xc2, 0xc0, 0xcd, 0xbc, 0xc6][..]), 0);
         assert_eq!(calculate_shift(&[0xbc, 0xc6, 0xc5, 0xc6, 0xcb][..]), 0);
         assert_eq!(calculate_shift(&[0xc6, 0xcb, 0xd0, 0xc5, 0xe0][..]), 0);
+    }
+    #[test]
+    fn enc_diff_shift2() {
         assert_eq!(calculate_shift(&[0x3c1, 0x312, 0x3a9, 0x2f7, 0x3f1][..]), 0);
+    }
+    #[test]
+    fn enc_diff_shift3() {
         assert_eq!(calculate_shift(&[0x20f, 0x17f, 0x1af, 0x197, 0x2c3][..]), 2);
+    }
+    #[test]
+    fn enc_diff_shift4() {
+        // raw mag = 0x400
         assert_eq!(calculate_shift(&[0x159, 0x01, 0x2c9, 0x3b5, 0x2c1][..]), 2);
-        // raw mag = 0x200, shift=1... so shifted unnecessarily but no decode error!?!
-        // [66, 73, d2, 21, 22, 1d, c9, 24, d2, 55, 9a, 70, 7a, 4b, f1, 17]
+    }
+    #[test]
+    fn enc_diff_shift5() {
+        // raw mag = 0x200
         assert_eq!(calculate_shift(&[0x167, 0x121, 0x11f, 0x121, 0x223][..]), 2);
+    }
+    #[test]
+    fn enc_diff_shift6() {
+        // raw mag = 0x200
+        assert_eq!(calculate_shift(&[0x2d8, 0x128, 0x1b4, 0xf0, 0x174][..]), 2);
     }
 }
