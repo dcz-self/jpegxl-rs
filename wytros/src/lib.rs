@@ -150,13 +150,15 @@ fn decode_j(j: u16, shift: u8, prev: u16) -> u16 {
     }
 }
 
-fn decode_chunk(bits: ReverseBits) -> [u16; 14] {
+/// Returns pixels and shift anomaly for each diff series
+fn decode_chunk(bits: ReverseBits) -> ([u16; 14], [Option<u8>; 4]) {
     /* This is written in a non-streaming, immutable fashion: every access to bits calculates the position again.
      * The advantage is that the input data will never get globally out of sync when some data accidentally gets digested (although ReverseBits being bounded already controls that to an extent). The cost is all the indexing multipliers.
      * 
      * To convert to a correct streaming version, make sure that no stream read operations are conditional. The format doesn't call for it: the stream is always the same size and shape.
      * Conversion should be easy, it's already this way anyway.
     */
+    let mut shift_anomaly = [None; 4];
     let mut out = [0u16; 14];
     // 2 pixels stored losslessly
     out[0] = (bits.get(0, 8) as u16) << 4 | bits.get(8, 4) as u16;
@@ -177,8 +179,16 @@ fn decode_chunk(bits: ReverseBits) -> [u16; 14] {
             */
             out[px_allidx] = dh!(px);
         }
+
+        // Optional, only for the sake of re-encoding
+        let (expected_shift, _diffs) = calculate_shift(&out[diffidx * 3..][..5]);
+        shift_anomaly[diffidx] = if expected_shift != shift {
+            Some(shift)
+        } else {
+            None
+        };
     }
-    out
+    (out, shift_anomaly)
 }
 
 /// `pxs` is 2 previously encoded pixels + 3 to-be-encoded
@@ -198,12 +208,10 @@ fn calculate_shift(pxs: &[u16]) -> (u8, [i16; 3]) {
         .filter(|shift| (0xffu16 << shift) > *maxpx)
         .next()
         .unwrap_or(4);
-        // +6 fails shift8, +7 fails shift9... +1 is "correct" apart from influence of dropped bits
-        // maybe maxdiff should be masked
-        // maxdiff0 = 0x79 -> shift=0
-        // maxdiff9 = 0x7a -> shift=0
-        // maxdiff8 = 0x7a -> shift=1
-    let diff_magnitude = (maxdiff + 1).next_power_of_two();
+        // maxdiff0 = 0x79, px_shift=4 -> shift=0
+        // maxdiff9 = 0x7a, px_shift=1 -> shift=0
+        // maxdiff8 = 0x7a, px_shift=4 -> shift=1
+    let diff_magnitude = (dh!(maxdiff) + 1).next_power_of_two();
     let shift = match dh!(diff_magnitude) >> 8 {
         0 => 0,
         1 => 1,
@@ -224,7 +232,7 @@ fn get_shift(pxs: &[u16], anomaly: Option<u8>) -> (u8, [i16; 3]) {
 
 /// Fucking ENCODER. Because otherwise how do I reconstruct the original?
 fn encode_chunk(pxs: &[u16; 14]) -> [u8; 16] {
-    reencode_chunk(pxs, &Default::default())
+    reencode_chunk(pxs, &[None; 4])
 }
 
 fn reencode_chunk(pxs: &[u16; 14], shift_anomaly: &[Option<u8>; 4]) -> [u8; 16] {
@@ -267,19 +275,32 @@ fn compare(a: &[u8; 16], b: &[u8; 16]) {
     }
 }
 
-pub fn decode(data: &[u8]) -> Result<Vec<u16>>{
+pub fn decode(data: &[u8]) -> Result<Vec<u16>> {
     if data.len() % 0x4000 == 0 {
+        let mut anomalies = Vec::new();
+        let mut failures = Vec::new();
         let mut out = Vec::with_capacity(data.len() * 14 / 16);
         iter_chunks(data)
             .enumerate()
             .map(|(i, data)| {
                 dh!(i);
                 let bits = ReverseBits(dh!(data));
-                let out = decode_chunk(bits);
-                assert_eq_hex!(&data, &encode_chunk(&out));
+                let (out, anomaly) = decode_chunk(bits);
+                if &data != &reencode_chunk(&out, &anomaly) {
+                    failures.push((i, data));
+                }
+                if let Some(_) = anomaly.iter().filter(|a| match a {
+                    None => false,
+                    Some(_) => true,
+                }).next() {
+                    anomalies.push((i, anomaly));
+                    //panic!();
+                }
                 out
             })
             .for_each(|chunk| out.extend_from_slice(&chunk[..]));
+        dbg!(anomalies);
+        dbg!(failures);
         Ok(out)
     } else {
         Err(Error::msg(format!("Bad size {}", data.len())))
@@ -339,7 +360,10 @@ mod test {
         let pixels = decode_chunk(ar);
         assert_eq!(
             pixels,
-            [0xbf, 0xc6, 0xbf, 0xc2, 0xc0, 0xcd, 0xbc, 0xc6, 0xc5, 0xc6, 0xcb, 0xd0, 0xc5, 0xe0],
+            (
+                [0xbf, 0xc6, 0xbf, 0xc2, 0xc0, 0xcd, 0xbc, 0xc6, 0xc5, 0xc6, 0xcb, 0xd0, 0xc5, 0xe0],
+                [None; 4],
+            ),
             "{:#x?}", &pixels,
         );
         
@@ -347,7 +371,10 @@ mod test {
         let pixels = decode_chunk(ar);
         assert_eq!(
             pixels,
-            [0x17f, 0x14b, 0x251, 0x1cf, 0x223, 0x189, 0x167, 0x121, 0x11f, 0x121, 0x223, 0x1c5, 0x209, 0x191],
+            (
+                [0x17f, 0x14b, 0x251, 0x1cf, 0x223, 0x189, 0x167, 0x121, 0x11f, 0x121, 0x223, 0x1c5, 0x209, 0x191],
+                [None; 4],
+            ),
             "{:#x?}", &pixels,
         );
     }
@@ -357,7 +384,7 @@ mod test {
         let ar = [0x90, 0x7A, 0x8A, 0x18, 0x02, 0x26, 0x92, 0xC7, 0xB7, 0x48, 0x20, 0x1F, 0x20, 0xC6, 0xF0, 0x0B];
         
         assert_eq_hex!(
-            encode_chunk(&decode_chunk(ReverseBits(ar))),
+            encode_chunk(&decode_chunk(ReverseBits(ar)).0),
             ar,
         );
     }
@@ -367,7 +394,7 @@ mod test {
         let ar = [0x21, 0x16, 0x47, 0x8f, 0x2d, 0x09, 0xa1, 0x26, 0x29, 0x6c, 0x61, 0x17, 0x30, 0xaf, 0xd3, 0x17];
         
         assert_eq_hex!(
-            encode_chunk(&decode_chunk(ReverseBits(ar))),
+            encode_chunk(&decode_chunk(ReverseBits(ar)).0),
             ar,
         );
     }
@@ -377,7 +404,7 @@ mod test {
         let ar = [0x89, 0x91, 0x7a, 0xe8, 0x11, 0xf6, 0x31, 0x59, 0x88, 0x84, 0x5f, 0xbb, 0xac, 0x01, 0x90, 0x15];
         
         assert_eq_hex!(
-            encode_chunk(&decode_chunk(ReverseBits(ar))),
+            encode_chunk(&decode_chunk(ReverseBits(ar)).0),
             ar,
         );
     }
@@ -388,7 +415,7 @@ mod test {
         let ar = [0x74, 0x89, 0x7f, 0xb0, 0x01, 0x1e, 0x52, 0x58, 0x57, 0x89, 0xa0, 0x6b, 0xf4, 0x01, 0xd0, 0x11];
         
         assert_eq_hex!(
-            encode_chunk(&decode_chunk(ReverseBits(ar))),
+            encode_chunk(&decode_chunk(ReverseBits(ar)).0),
             ar,
         );
     }
@@ -398,7 +425,7 @@ mod test {
         let ar = [0x7c, 0x7b, 0x8f, 0x40, 0xc6, 0xe9, 0xc1, 0xa8, 0x67, 0x48, 0xa4, 0x40, 0x24, 0x02, 0xa0, 0x0b];
         
         assert_eq_hex!(
-            encode_chunk(&decode_chunk(ReverseBits(ar))),
+            encode_chunk(&decode_chunk(ReverseBits(ar)).0),
             ar,
         );
     }
@@ -409,7 +436,7 @@ mod test {
         
         assert_eq_hex!(
             reencode_chunk(
-                &decode_chunk(ReverseBits(ar)),
+                &decode_chunk(ReverseBits(ar)).0,
                 &[Some(1), None, None, None],
             ),
             ar,
@@ -421,7 +448,28 @@ mod test {
         let ar = [0x6a, 0x62, 0xf9, 0xa0, 0x83, 0x4a, 0x67, 0xe8, 0x48, 0x85, 0x10, 0x57, 0x45, 0x2e, 0x42, 0x3f];
         
         assert_eq_hex!(
-            encode_chunk(&decode_chunk(ReverseBits(ar))),
+            encode_chunk(&decode_chunk(ReverseBits(ar)).0),
+            ar,
+        );
+    }
+    
+    /*#[test]
+    fn reencode7() {
+        let ar = [0x87, 0x87, 0x81, 0x0c, 0xf2, 0xd9, 0x01, 0x78, 0x88, 0x07, 0xdc, 0x27, 0x40, 0x02, 0x80, 0x08];
+        
+        assert_eq_hex!(
+            encode_chunk(&decode_chunk(ReverseBits(ar)).0),
+            ar,
+        );
+        Fails: one of the `j`s is == 0 to indicate no change. No workaround intended.
+    }*/
+    
+    #[test]
+    fn reencode8() {
+        let ar = [0x6a, 0x66, 0x70, 0xbc, 0x6e, 0x6d, 0x51, 0x28, 0x98, 0x8c, 0xa0, 0x67, 0x19, 0x02, 0x30, 0x2d];
+        
+        assert_eq_hex!(
+            encode_chunk(&decode_chunk(ReverseBits(ar)).0),
             ar,
         );
     }
@@ -491,5 +539,12 @@ mod test {
         // (maxdiff + 8).next_power_of_two() = 80
         // diffs = [16, ff86, ffde]
         assert_matches!(calculate_shift(&[0x200, 0x424, 0x279, 0x406, 0x263][..]), (0, _));
+    }
+    
+    #[test]
+    fn enc_diff_shift10() {
+        // (maxdiff + 8).next_power_of_two() = 80
+        // diffs = [16, ff86, ffde]
+        assert_matches!(calculate_shift(&[0x2d3, 0x02, 0x2b8, 0x9e, 0x2ba][..]), (0, _));
     }
 }
