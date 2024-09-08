@@ -1,5 +1,8 @@
 /*!
  * Wytros: decodes and encodes Panasonic RW2 files, back and forth between compressed and 12-bit data. Encoder tries to reproduce TZ-101's quirks.
+ * Failures to predict the original encoder are saved either as mispredicted shift values (various circumstances), or entire blocks (j==0).
+ * 
+ * Thanks to https://www.dpreview.com/forums/post/40154581
  */
 use anyhow::{Error, Result};
 use std::cmp;
