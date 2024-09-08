@@ -13,6 +13,7 @@ pub struct EncoderFrame<'data, T: PixelType> {
     num_channels: Option<u32>,
     endianness: Option<JxlEndianness>,
     align: Option<usize>,
+    extra_channels: Vec<ExtraChannel<'data, T>>,
 }
 
 impl<'data, T: PixelType> EncoderFrame<'data, T> {
@@ -25,6 +26,7 @@ impl<'data, T: PixelType> EncoderFrame<'data, T> {
             num_channels: None,
             endianness: None,
             align: None,
+            extra_channels: Vec::new(),
         }
     }
 
@@ -60,6 +62,18 @@ impl<'data, T: PixelType> EncoderFrame<'data, T> {
             align: self.align.unwrap_or(0),
         }
     }
+    
+    // TODO: allow channels of different types
+    /// Add an extra channel.
+    #[must_use]
+    pub fn extra_channel(mut self, channel: ExtraChannel<'data, T>) -> Self {
+        self.extra_channels.push(channel);
+        self
+    }
+    
+    pub(crate) fn get_extra_channels(&self) -> &[ExtraChannel<'data, T>] {
+        &self.extra_channels
+    }
 }
 
 /// A wrapper type for encoding multiple frames
@@ -93,5 +107,36 @@ impl<U: PixelType> MultiFrames<'_, '_, '_, U> {
     /// Return [`EncodeError`] if the internal encoder fails to encode
     pub fn encode(self) -> Result<EncoderResult<U>, EncodeError> {
         self.0.start_encoding()
+    }
+}
+
+/// A channel for the encoder, consisting of the pixels and its options
+pub struct ExtraChannel<'data, T: PixelType> {
+    pub data: &'data [T],
+    pub bits_per_sample: (u32, u32),
+    pub name: Option<String>,
+    pub endianness: JxlEndianness,
+    pub align: usize,
+}
+
+impl<'data, T: PixelType> ExtraChannel<'data, T> {
+    /// Create a default channel from the data.
+    pub fn new(data: &'data [T]) -> Self {
+        Self {
+            data,
+            bits_per_sample: T::bits_per_sample(),
+            name: None,
+            endianness: JxlEndianness::Native,
+            align: 0,
+        }
+    }
+    
+    pub(crate) fn pixel_format(&self) -> JxlPixelFormat {
+        JxlPixelFormat {
+            num_channels: 0,
+            data_type: T::pixel_type(),
+            endianness: self.endianness,
+            align: self.align,
+        }
     }
 }

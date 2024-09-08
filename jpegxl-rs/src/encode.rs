@@ -343,6 +343,50 @@ impl JxlEncoder<'_, '_> {
         })
     }
 
+    /// Add extra channel under the given index
+    fn add_extra_channel<T: PixelType>(&self, channel: &ExtraChannel<T>, index: usize) -> Result<(), EncodeError> {
+        let (bits_per_sample, exponent_bits_per_sample) = channel.bits_per_sample;
+        self.check_enc_status(unsafe {
+            JxlEncoderSetExtraChannelInfo(
+                self.enc,
+                index,
+                &JxlExtraChannelInfo {
+                    // TODO: use meaningful channel types
+                    // SpotColor is the only one that doesn't crash
+                    type_: JxlExtraChannelType::SpotColor,
+                    bits_per_sample,
+                    exponent_bits_per_sample,
+                    dim_shift: 0, // no downsampling
+                    name_length: match channel.name.as_ref() {
+                        None => 0,
+                        Some(name) => name.len() as u32,
+                    },
+                    alpha_associated: JxlBool::False, // not applicable
+                    spot_color: [0., 0., 0., 0.], // not applicable
+                    cfa_channel: 0, // not applicable
+                },
+            )
+        })?;
+
+        self.check_enc_status(unsafe {
+            JxlEncoderSetExtraChannelBuffer(
+                self.options_ptr,
+                &channel.pixel_format(),
+                channel.data.as_ptr().cast(),
+                std::mem::size_of_val(channel.data),
+                index as u32,
+            )
+        })?;
+
+        if let Some(name) = channel.name.as_ref() {
+            todo!("set name");
+            self.check_enc_status(unsafe {
+                JxlEncoderSetExtraChannelName(self.enc, index, name.as_ptr(), name.len())
+            })?;
+        }
+        Ok(())
+    }
+    
     fn _internal(&mut self) -> Result<Vec<u8>, EncodeError> {
         unsafe { JxlEncoderCloseInput(self.enc) };
 
@@ -531,6 +575,9 @@ impl<'prl, 'mm> JxlEncoder<'prl, 'mm> {
     ) -> Result<EncoderResult<U>, EncodeError> {
         self.setup_encoder(width, height, (bits_per_sample, exponent_bits_per_sample), self.has_alpha)?;
         self.add_frame(frame)?;
+        for (i, channel) in frame.get_extra_channels().iter().enumerate() {
+            self.add_extra_channel(channel, i)?;
+        }
         self.start_encoding::<U>()
     }
 }

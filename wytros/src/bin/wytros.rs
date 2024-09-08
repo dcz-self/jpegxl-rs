@@ -58,6 +58,58 @@ fn bayer_to_rgb(
     out
 }
 
+
+/// Extracts second green
+fn bayer_to_g2(
+    bayer: &[u16],
+    width: u32, // of the input image
+    height: u32,
+    mosaic_pattern: &CfaPattern,
+) -> Vec<u16> {
+    // Bayer sizing notation is different from rgb... only one channel per pixel in bayer.
+    let out_w = width / 2;
+    let out_h = height / 2;
+    let out_channels = 1;
+    let out_pixels = (out_h * out_w) as usize * out_channels;
+    let mut out = Vec::with_capacity(out_pixels);
+    out.resize(out_pixels, 0);
+    assert_eq!(*mosaic_pattern, CfaPattern::Gbrg);
+    let bayer_pitch = width;
+    let rgb_pitch = out_w * out_channels as u32;
+    
+    // iterating over the output to take advantage of SIMD, which needs a predictable write pattern
+    out.iter_mut().enumerate()
+        .map(|(i, out)| {
+            let subpx = i % out_channels;
+            let x = (i as u32 % rgb_pitch) / out_channels as u32;
+            let y = i as u32 / rgb_pitch;
+            /* G2
+             * ⇓
+             * G1 B
+             * R G2
+             * 
+             * This means double the rows, half the columns (still 2* pixels).
+             */
+            let (subx, suby) = match subpx {
+                0 => (1, 1), // g2
+                _ => unreachable!(),
+            };
+            let bayer_row = (y * 2) | suby;
+            let bayer_column = (x * 2) | subx;
+            let bayer_index = bayer_row * bayer_pitch + bayer_column;
+            (bayer_index as usize, out)
+        })
+        .for_each(|(idx, out)| *out = bayer[idx]);
+    out
+}
+
+fn bayer_to_rg1b_g2(bayer: &[u16], width: u32, height: u32, mosaic_pattern: &CfaPattern) -> (Vec<u16>, Vec<u16>) {
+    (
+        bayer_to_rgb(bayer, width, height, mosaic_pattern),
+        bayer_to_g2(bayer, width, height, mosaic_pattern),
+    )
+}
+
 fn bayer_to_rg1bg2(bayer: &[u16], width: u32, height: u32, mosaic_pattern: &CfaPattern) -> Vec<u16> {
     // Bayer sizing notation is different from rgb... only one channel per pixel in bayer.
     let out_w = width / 2;
@@ -125,7 +177,7 @@ fn run() -> Result<()> {
         dbg!(img.data8().unwrap().len());
         let bayer_buffer = decode(&img.data8().unwrap())?;
         dbg!(bayer_buffer.len());
-        let swizzled = bayer_to_rg1bg2(
+        let (swizzled, greench) = bayer_to_rg1b_g2(
             &bayer_buffer[..(img.width() as usize * img.height() as usize)],
             img.width(),
             img.height(),
@@ -143,8 +195,15 @@ fn run() -> Result<()> {
             // I don't know what it changes apart from color profile in metadata anyway
             .color_encoding(jxl::encode::ColorEncoding::LinearSrgb)
             .build()?;
-            
-        let frame = jxl::encode::EncoderFrame::new(&swizzled[..]).num_channels(4);
+
+        let frame = jxl::encode::EncoderFrame::new(&swizzled[..])
+            .num_channels(3)
+            .extra_channel(jxl::encode::ExtraChannel {
+                bits_per_sample: (12, 0),
+                name: None,//Some("green2".into()),
+                ..jxl::encode::ExtraChannel::new(&greench[..])
+            });
+
         let encoded = enc.encode_frame_with_bit_depth::<u16, u16>(&frame, img.width() / 2, img.height() / 2, (12, 0))?;
         let mut out = File::create("/mnt/space/rhn/out.jxl")?;
         out.write_all(&encoded)?;
