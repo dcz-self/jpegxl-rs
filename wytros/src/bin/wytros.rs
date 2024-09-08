@@ -29,7 +29,7 @@ fn run() -> Result<()> {
         dbg!(img.height());
         dbg!(img.data8().unwrap().len());
         dbg!(&img.data8().unwrap()[..16]);
-        dbg!(decode(&img.data8().unwrap()[..16])?);
+        dbg!(decode(&img.data8().unwrap())?);
     }
     let mut enc = jxl::encoder_builder()
         // we're compressing raw, duh

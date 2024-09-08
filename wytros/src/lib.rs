@@ -1,6 +1,4 @@
-use std::ops::Shl;
-
-use anyhow::Result;
+use anyhow::{Error, Result};
 
 #[macro_export]
 macro_rules! dh {
@@ -16,7 +14,7 @@ macro_rules! dh {
         // of temporaries - https://stackoverflow.com/a/48732525/1063961
         match $val {
             tmp => {
-                eprintln!("[{}:{}:{}] {} = {:#x?}",
+                eprintln!("[{}:{}:{}] {} = {:02x?}",
                     file!(), line!(), column!(), stringify!($val), &tmp);
                 tmp
             }
@@ -26,6 +24,39 @@ macro_rules! dh {
         ($($crate::dbg_hex!($val)),+,)
     };
 }
+
+#[macro_export]
+macro_rules! assert_eq_hex {
+    ($left:expr, $right:expr $(,)?) => ({
+        match (&$left, &$right) {
+            (left_val, right_val) => {
+                if !(*left_val == *right_val) {
+                    // The reborrows below are intentional. Without them, the stack slot for the
+                    // borrow is initialized even before the values are compared, leading to a
+                    // noticeable slow down.
+                    panic!(r#"assertion `left == right` failed
+  left: {:02x?}
+ right: {:02x?}"#, &*left_val, &*right_val)
+                }
+            }
+        }
+    });
+    ($left:expr, $right:expr, $($arg:tt)+) => ({
+        match (&($left), &($right)) {
+            (left_val, right_val) => {
+                if !(*left_val == *right_val) {
+                    // The reborrows below are intentional. Without them, the stack slot for the
+                    // borrow is initialized even before the values are compared, leading to a
+                    // noticeable slow down.
+                    panic!(r#"assertion `left == right` failed: {}
+  left: {:02x?}
+ right: {:02x?}"#, format_args!($($arg)+), &*left_val, &*right_val)
+                }
+            }
+        }
+    });
+}
+
 
 /// Converts chunk index to first byte offset within block
 fn chunk_to_offset(idx: usize) -> usize {
@@ -47,8 +78,14 @@ fn block_get_chunk(data: &[u8], chunk_idx: usize) -> [u8; 16] {
     if data_offset == 0x3ff8 {
         out[0..8].copy_from_slice(&block[data_offset..][..8]);
         out[8..16].copy_from_slice(&block[0..8]);
+    } else {
+        out[0..16].copy_from_slice(&block[data_offset..][..16]);
     }
     out
+}
+
+fn iter_chunks(data: &[u8]) -> impl Iterator<Item=[u8; 16]> + '_ {
+    (0..(data.len() / 0x4000)).map(|i| block_get_chunk(data, i))
 }
 
 macro_rules! to_lsb_mask {
@@ -58,7 +95,7 @@ macro_rules! to_lsb_mask {
 }
 
 #[derive(Debug, Clone)]
-struct ReverseBits([u8;16]);
+pub struct ReverseBits(pub [u8;16]);
 
 impl ReverseBits {
     /// Gets up to 8 bits from the group. Starting with the last byte. Most significant bits of each byte go first into most significant bits of output. See test if this is confusing.
@@ -132,12 +169,84 @@ fn decode_chunk(bits: ReverseBits) -> [u16; 14] {
     out
 }
 
-fn encode_chunk(data: &[u16; 14]) -> [u8; 16] {
-    todo!();
+/// Fucking ENCODER. Because otherwise how do I reconstruct the original?
+fn encode_chunk(pxs: &[u16; 14]) -> [u8; 16] {
+    let mut bits = ReverseBits([0; 16]);
+    // 2 pixels stored losslessly
+    bits.set(0, 8, (pxs[0] >> 4) as u8);
+    bits.set(8, 4, (pxs[0] & 0xf) as u8);
+    bits.set(12, 8, (pxs[1] >> 4) as u8);
+    bits.set(20, 4, (pxs[1] & 0xf) as u8);
+    // 4 independent differential groups in every chunk
+    for diffidx in 0..4 {
+        let mut outpx = [pxs[diffidx * 3], pxs[diffidx * 3 + 1], 0, 0, 0];
+        let mut diffs = [0; 3];
+        dh!(&pxs[diffidx * 3..][..3]);
+        pxs[diffidx * 3..][..3].iter()
+            .zip(pxs[diffidx * 3 + 1..][..3].iter())
+            .map(|(p, n)| *p as i16 - *n as i16)
+            .zip(diffs.iter_mut())
+            .for_each(|(d, o)| *o = d);
+        dh!(diffs);
+        let maxdiff = diffs.iter().map(|d| d.abs() as u16).max().unwrap();
+        let magnitude = dh!(dh!(maxdiff).next_power_of_two());
+        let shift = match magnitude >> 7 {
+            0 => 0,
+            1 => 1,
+            2 => 2,
+            _ => 4,
+        }; // 4 >> 3.saturating_sub( .neg().trailing_zeros())
+        /*let magnitude = 0x80 << shift;
+        if prev < mag {
+            enc = (diff + magnitude) >> shift;
+            outpx = (enc << shift) | (prev & shiftmask)
+            
+        }
+        */
+        bits.set(24 + diffidx * (2+3*8), 2, shift);
+    }
+    // 3 pixels in every group, chained to the previous pixel of the same color
+    /*
+    for pxidx in 0..3 {
+            let px_allidx = 2 + diffidx * 3 + pxidx;
+            let prev = out[px_allidx - 2];
+            let j = bits.get(24 + 2 + diffidx * (2 + 3 * 8) + pxidx * 8, 8) as u16;
+    }*/
+    bits.0
 }
 
-pub fn decode(data: &[u8]) -> Result<()>{
-    panic!();
+fn compare(a: &[u8; 16], b: &[u8; 16]) {
+    let a = ReverseBits(a.clone());
+    let b = ReverseBits(b.clone());
+    
+    let g = |i, c| assert_eq_hex!(a.get(i, c), b.get(i, c));
+    for diffidx in 0..4 {
+        g(24+diffidx * 2+3*8, 2);
+    }
+}
+
+pub fn decode(data: &[u8]) -> Result<Vec<u16>>{
+    if data.len() % 0x4000 == 0 {
+        let mut out = Vec::with_capacity(data.len() * 14 / 16);
+        iter_chunks(dh!(&data[..0x4000]))
+            .enumerate()
+            .map(|(i, data)| {
+                if i == 0 {
+                    assert_eq_hex!(
+                        [0x90, 0x7A, 0x8A, 0x18, 0x02, 0x26, 0x92, 0xC7, 0xB7, 0x48, 0x20, 0x1F, 0x20, 0xC6, 0xF0, 0x0B],
+                        data,
+                    );
+                }
+                let bits = ReverseBits(data);
+                let out = decode_chunk(bits);
+                compare(&data, &encode_chunk(&out));
+                out
+            })
+            .for_each(|chunk| out.extend_from_slice(&chunk[..]));
+        Ok(out)
+    } else {
+        Err(Error::msg(format!("Bad size {}", data.len())))
+    }
 }
 
 #[cfg(test)]
