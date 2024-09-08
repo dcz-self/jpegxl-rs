@@ -4,24 +4,30 @@ use libopenraw::{rawfile_from_file, Bitmap, CfaPattern, Image, RenderingOptions}
 use log::LevelFilter;
 use simple_logger::SimpleLogger;
 use std::env;
+use std::fs::File;
+use std::io::Write;
 use wytros::decode;
 
 fn main() {
     run().unwrap();
 }
 
-fn bayer_to_rg1bg2(bayer: &[u16], width: u32, mosaic_pattern: &CfaPattern) -> Vec<u16> {
-    let mut out = Vec::with_capacity(dbg!(bayer.len()));
-    out.resize(bayer.len(), 0);
-    // iterating over the output to take advantage of SIMD, which needs a predictable write pattern
+fn bayer_to_rg1bg2(bayer: &[u16], width: u32, height: u32, mosaic_pattern: &CfaPattern) -> Vec<u16> {
+    // Bayer sizing notation is different from rgb... only one channel per pixel in bayer.
+    let out_w = width / 2;
+    let out_h = height / 2;
+    let mut out = Vec::with_capacity((out_h * out_w) as usize * 4);
+    out.resize((out_w * out_h) as usize * 4, 0);
     assert_eq!(*mosaic_pattern, CfaPattern::Gbrg);
-    let subpx_width = width * 4;
+    let bayer_pitch = width;
+    let rgb_pitch = out_w * 4;
+    
+    // iterating over the output to take advantage of SIMD, which needs a predictable write pattern
     out.iter_mut().enumerate()
         .map(|(i, out)| {
-            let i = i as u32;
-            let x = i % subpx_width;
-            let y = i / subpx_width;
             let subpx = i % 4;
+            let x = (i as u32 % rgb_pitch) / 4;
+            let y = i as u32 / rgb_pitch;
             /* R G1 B G2
              * ⇓
              * G1 B
@@ -36,9 +42,17 @@ fn bayer_to_rg1bg2(bayer: &[u16], width: u32, mosaic_pattern: &CfaPattern) -> Ve
                 3 => (1, 1), // g2
                 _ => unreachable!(),
             };
-            let bayer_row = y * 2 | suby;
-            let bayer_column = x * 2 | subx;
-            let bayer_index = bayer_row * width * 2 + bayer_column;
+            let bayer_row = (y * 2) | suby;
+            let bayer_column = (x * 2) | subx;
+            let bayer_index = bayer_row * bayer_pitch + bayer_column;
+            if bayer_index as usize >= bayer.len() {
+                dbg!(i);
+                dbg!(bayer_index);
+                dbg!(bayer.len());
+                dbg!(bayer_row, y);
+                dbg!(bayer_column, x);
+                panic!();
+            }
             (bayer_index as usize, out)
         })
         .for_each(|(idx, out)| *out = bayer[idx]);
@@ -63,22 +77,29 @@ fn run() -> Result<()> {
         dbg!(img.width());
         dbg!(img.height());
         dbg!(img.data8().unwrap().len());
-        dbg!(&img.data8().unwrap()[..16]);
         let bayer_buffer = decode(&img.data8().unwrap())?;
         dbg!(bayer_buffer.len());
-        let swizzled = bayer_to_rg1bg2(&bayer_buffer, img.width(), img.mosaic_pattern());
+        let swizzled = bayer_to_rg1bg2(
+            &bayer_buffer[..(img.width() as usize * img.height() as usize)],
+            img.width(),
+            img.height(),
+            img.mosaic_pattern(),
+        );
+        dbg!(swizzled.len());
         
         let mut enc = jxl::encoder_builder()
             // we're compressing raw, duh
             .lossless(true)
             .uses_original_profile(true)
-            .speed(jxl::encode::EncoderSpeed::Tortoise)
+            .speed(jxl::encode::EncoderSpeed::Squirrel)//Tortoise)
             .use_container(true)
             // not really true for raw sensor data but doesn't hurt I guess.
             // I don't know what it changes apart from color profile in metadata anyway
             .color_encoding(jxl::encode::ColorEncoding::LinearSrgb)
             .build()?;
         let encoded = enc.encode::<u16, u16>(&swizzled[..], img.width() / 2, img.height() / 2)?;
+        let mut out = File::create("/mnt/space/rhn/out.jxl")?;
+        out.write_all(&encoded)?;
     }
     Ok(())
 }
