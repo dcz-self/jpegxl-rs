@@ -75,22 +75,31 @@ impl ReverseBits {
 }
 
 fn decode_chunk(bits: ReverseBits) -> [u16; 14] {
+    /* This is written in a non-streaming, immutable fashion: every access to bits calculates the position again.
+     * The advantage is that the input data will never get globally out of sync when some data accidentally gets digested (although ReverseBits being bounded already controls that to an extent). The cost is all the indexing multipliers.
+    */
     let mut out = [0u16; 14];
+    // 2 pixels stored losslessly
     out[0] = (bits.get(0, 8) as u16) << 4 | bits.get(8, 4) as u16;
     out[1] = (bits.get(12, 8) as u16) << 4 | bits.get(20, 4) as u16;
+    // 4 independent differential groups in every chunk
     for diffidx in 0..4 {
         let shift = bits.get(24 + diffidx * (2+3*8), 2);
         let shift = 4 >> (3 - shift);
         let magnitude = 0x80 << shift;
+        // 3 pixels in every group, chained to the previous pixel of the same color
         for pxidx in 0..3 {
             let px_allidx = 2 + diffidx * 3 + pxidx;
             let prev = out[px_allidx - 2];
             let j = bits.get(24 + 2 + diffidx * (2 + 3 * 8) + pxidx * 8, 8) as u16;
             let px = if j != 0 {
+                // This is the lossy part. 
                 if (magnitude > prev) | (shift == 4) {
+                    // If shift > 0 then previous pixel data gets replaced, accidental LSBs get carried from old value.
                     j << shift | prev & !(!0 << shift)
                 } else {
-                    prev - magnitude + j
+                    // If shift > 0 then the encoder dropped the LSBs
+                    prev - magnitude + j << shift
                 }
             } else {
                 prev
