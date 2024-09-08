@@ -47,6 +47,7 @@ pub fn build() {
         .define("JPEGXL_ENABLE_SKCMS", "OFF")
         .define("JPEGXL_ENABLE_OPENEXR", "OFF")
         .define("JPEGXL_ENABLE_JPEGLI", "OFF")
+        .define("JPEGXL_FORCE_SYSTEM_LCMS2", "ON")
         .define("JPEGXL_BUNDLE_LIBPNG", "OFF");
 
     if let Ok(p) = std::thread::available_parallelism() {
@@ -78,6 +79,7 @@ pub fn build() {
     #[cfg(feature = "threads")]
     println!("cargo:rustc-link-lib=static=jxl_threads");
 
+    println!("cargo:rustc-link-lib=lcms2");
     println!("cargo:rustc-link-lib=hwy");
     println!("cargo:rustc-link-lib=brotlicommon");
     println!("cargo:rustc-link-lib=brotlidec");

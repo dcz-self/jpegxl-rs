@@ -444,7 +444,7 @@ dependencies = [
  "jpegxl-sys",
  "lcms2",
  "pretty_assertions",
- "testresult",
+ "testresult 0.4.1",
  "thiserror",
 ]
 
@@ -741,6 +741,12 @@ dependencies = [
 
 [[package]]
 name = "testresult"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "52e045f5cf9ad69772c1c9652f5567a75df88bbb5a1310a64e53cab140c5c459"
+
+[[package]]
+name = "testresult"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "614b328ff036a4ef882c61570f72918f7e9c5bee1da33f8e7f91e01daee7e56c"
@@ -936,6 +942,19 @@ name = "windows_x86_64_msvc"
 version = "0.52.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bec47e5bfd1bff0eeaf6d8b485cc1074891a197ab4225d504cb7a1ab88b02bf0"
+
+[[package]]
+name = "wytros"
+version = "0.0.1"
+dependencies = [
+ "byteorder",
+ "derive_builder",
+ "half",
+ "jpegxl-rs",
+ "pretty_assertions",
+ "testresult 0.3.0",
+ "thiserror",
+]
 
 [[package]]
 name = "yansi"
