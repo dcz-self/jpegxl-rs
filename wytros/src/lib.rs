@@ -182,7 +182,7 @@ fn calculate_shift(pxs: &[u16]) -> u8 {
     dh!(diffs);
     let maxdiff = diffs.iter().map(|d| d.abs() as u16).max().unwrap();
     let magnitude = dh!((dh!(maxdiff)+1).next_power_of_two());
-    let magnitude = if pxs.iter().any(|p| magnitude > *p) {
+    let magnitude = if pxs[2..].iter().filter(|p| magnitude > **p).count() > 2 {
         magnitude >> 1
     } else {
         magnitude
@@ -310,6 +310,14 @@ mod test {
             [0xbf, 0xc6, 0xbf, 0xc2, 0xc0, 0xcd, 0xbc, 0xc6, 0xc5, 0xc6, 0xcb, 0xd0, 0xc5, 0xe0],
             "{:#x?}", &pixels,
         );
+        
+        let ar = ReverseBits([0x66, 0x73, 0xd2, 0x21, 0x22, 0x1d, 0xc9, 0x24, 0xd2, 0x55, 0x9a, 0x70, 0x7a, 0x4b, 0xf1, 0x17]);
+        let pixels = decode_chunk(ar);
+        assert_eq!(
+            pixels,
+            [0x17f, 0x14b, 0x251, 0x1cf, 0x223, 0x189, 0x167, 0x121, 0x11f, 0x121, 0x223, 0x1c5, 0x209, 0x191],
+            "{:#x?}", &pixels,
+        );
     }
     
     #[test]
@@ -329,7 +337,10 @@ mod test {
         assert_eq!(calculate_shift(&[0xbc, 0xc6, 0xc5, 0xc6, 0xcb][..]), 0);
         assert_eq!(calculate_shift(&[0xc6, 0xcb, 0xd0, 0xc5, 0xe0][..]), 0);
         assert_eq!(calculate_shift(&[0x3c1, 0x312, 0x3a9, 0x2f7, 0x3f1][..]), 0);
+        assert_eq!(calculate_shift(&[0x20f, 0x17f, 0x1af, 0x197, 0x2c3][..]), 2);
         assert_eq!(calculate_shift(&[0x159, 0x01, 0x2c9, 0x3b5, 0x2c1][..]), 2);
-        
+        // raw mag = 0x200, shift=1... so shifted unnecessarily but no decode error!?!
+        // [66, 73, d2, 21, 22, 1d, c9, 24, d2, 55, 9a, 70, 7a, 4b, f1, 17]
+        assert_eq!(calculate_shift(&[0x167, 0x121, 0x11f, 0x121, 0x223][..]), 2);
     }
 }
