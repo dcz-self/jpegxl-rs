@@ -131,7 +131,7 @@ fn decode_j(j: u16, shift: u8, prev: u16) -> u16 {
     let magnitude = 0x80 << shift;
     if j != 0 {
         // This is the lossy part. 
-        if (magnitude > prev) | (shift == 4) {
+        if magnitude > prev || shift == 4 {
             // If shift > 0 then previous pixel data gets replaced, accidental LSBs get carried from old value.
             dh!((dh!(j) << shift) | (prev & !(!0 << shift)))
         } else {
@@ -221,7 +221,7 @@ fn encode_chunk(pxs: &[u16; 14]) -> [u8; 16] {
         for (px_diffidx, diff) in diffs.iter().enumerate() {
             let prev = outpxs[px_diffidx];
             let px = inpxs[px_diffidx + 2];
-            let j = if dh!(prev) < magnitude {
+            let j = if dh!(prev) < magnitude || shift == 4 {
                 px >> shift
             } else {
                 ((diff + magnitude as i16) as u16) >> shift
@@ -351,6 +351,16 @@ mod test {
     #[test]
     fn reencode2() {
         let ar = [0x89, 0x91, 0x7a, 0xe8, 0x11, 0xf6, 0x31, 0x59, 0x88, 0x84, 0x5f, 0xbb, 0xac, 0x01, 0x90, 0x15];
+        
+        assert_eq_hex!(
+            encode_chunk(&decode_chunk(ReverseBits(ar))),
+            ar,
+        );
+    }
+    
+    #[test]
+    fn reencode3() {
+        let ar = [0x74, 0x89, 0x7f, 0xb0, 0x01, 0x1e, 0x52, 0x58, 0x57, 0x89, 0xa0, 0x6b, 0xf4, 0x01, 0xd0, 0x11];
         
         assert_eq_hex!(
             encode_chunk(&decode_chunk(ReverseBits(ar))),
