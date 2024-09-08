@@ -1,3 +1,6 @@
+/*!
+ * Wytros: decodes and encodes Panasonic RW2 files, back and forth between compressed and 12-bit data. Encoder tries to reproduce TZ-101's quirks.
+ */
 use anyhow::{Error, Result};
 use std::cmp;
 
@@ -91,7 +94,7 @@ fn iter_chunks(data: &[u8]) -> impl Iterator<Item=[u8; 16]> + '_ {
 
 macro_rules! to_lsb_mask {
     ($count:expr) => {
-        !(!0 << count)
+        !(!0 << $count)
     };
 }
 
@@ -139,8 +142,8 @@ fn decode_j(j: u16, shift: u8, prev: u16) -> u16 {
 
             // Pretty-print for the actual difference value.
             // I'm not using this exact calculation to stay in u16
-            // dh!((j << shift) as i16 - magnitude as i16);
-            prev - magnitude + (dh!(j) << shift)
+            dh!((j << shift) as i16 - magnitude as i16);
+            prev - magnitude + (j << shift)
         }
     } else {
         prev
@@ -195,7 +198,11 @@ fn calculate_shift(pxs: &[u16]) -> (u8, [i16; 3]) {
         .filter(|shift| (0xffu16 << shift) > *maxpx)
         .next()
         .unwrap_or(4);
-    let diff_magnitude = dh!((maxdiff+1).next_power_of_two());
+        // +6 fails shift8, +7 fails shift9... +1 is "correct" apart from influence of dropped bits
+        // maybe maxdiff should be masked
+        // maxdiff9 = 0x7a -> shift=0
+        // maxdiff8 = 0x7a -> shift=1
+    let diff_magnitude = dh!((dh!(maxdiff | to_lsb_mask!(px_shift)) + 2).next_power_of_two());
     let shift = match diff_magnitude >> 8 {
         0 => 0,
         1 => 1,
@@ -383,6 +390,16 @@ mod test {
     }
     
     #[test]
+    fn reencode5() {
+        let ar = [0x64, 0x7a, 0x92, 0xb0, 0x29, 0xe5, 0xd1, 0x89, 0x96, 0xc7, 0x5f, 0x46, 0x6f, 0x02, 0x60, 0x58];
+        
+        assert_eq_hex!(
+            encode_chunk(&decode_chunk(ReverseBits(ar))),
+            ar,
+        );
+    }
+    
+    #[test]
     fn enc_diff_shift() {
         assert_matches!(calculate_shift(&[0xbf, 0xc6, 0xbf, 0xc2, 0xc0][..]), (0, _));
         assert_matches!(calculate_shift(&[0xc2, 0xc0, 0xcd, 0xbc, 0xc6][..]), (0, _));
@@ -422,5 +439,18 @@ mod test {
         // diffs = [70, ff80, fda0]
         // j recalculation overflows when shift is reduced, unlike 4
         assert_matches!(calculate_shift(&[0x407, 0x1ef, 0x477, 0x16f, 0x217][..]), (4, _));
+    }
+    
+    #[test]
+    fn enc_diff_shift8() {
+        // (maxdiff + 1).next_power_of_two() = 80
+        // diffs = [7a, 30, fffe]
+        assert_matches!(calculate_shift(&[0x586, 0x02, 0x600, 0x32, 0x5fe][..]), (1, _));
+    }
+    #[test]
+    fn enc_diff_shift9() {
+        // (maxdiff + 8).next_power_of_two() = 80
+        // diffs = [16, ff86, ffde]
+        assert_matches!(calculate_shift(&[0x19e, 0x313, 0x1b4, 0x299, 0x192][..]), (0, _));
     }
 }
