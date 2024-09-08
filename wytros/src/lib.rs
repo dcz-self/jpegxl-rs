@@ -155,7 +155,7 @@ fn decode_chunk(bits: ReverseBits) -> [u16; 14] {
                 } else {
                     // If shift > 0 then the encoder dropped the LSBs
                     dh!((j << shift) as i16 - magnitude as i16);
-                    prev - magnitude + j << shift
+                    dh!(prev) - magnitude + (j << shift)
                 }
             } else {
                 prev
@@ -164,7 +164,7 @@ fn decode_chunk(bits: ReverseBits) -> [u16; 14] {
              * it will read extra 4 bits for the last 2 pixels if there's all 0's in the chunk. This should send the stream out of whack.
              * The pana_bits reader strongly suggests that the stream of data is separated into 16-byte chunks, so reading another byte (or half-byte if interrupted) would contradict it.
             */
-            out[px_allidx] = px;
+            out[px_allidx] = dh!(px);
         }
     }
     out
