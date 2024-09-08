@@ -133,10 +133,11 @@ fn decode_j(j: u16, shift: u8, prev: u16) -> u16 {
         // This is the lossy part. 
         if (magnitude > prev) | (shift == 4) {
             // If shift > 0 then previous pixel data gets replaced, accidental LSBs get carried from old value.
-            (dh!(j) << shift) | (prev & !(!0 << shift))
+            dh!((dh!(j) << shift) | (prev & !(!0 << shift)))
         } else {
-            // If shift > 0 then the encoder dropped the LSBs
-            // pretty-print for the actual difference value.
+            // If shift > 0 then the encoder dropped the LSBs.
+
+            // Pretty-print for the actual difference value.
             // I'm not using this exact calculation to stay in u16
             // dh!((j << shift) as i16 - magnitude as i16);
             prev - magnitude + (dh!(j) << shift)
@@ -164,14 +165,14 @@ fn decode_chunk(bits: ReverseBits) -> [u16; 14] {
         // 3 pixels in every group, chained to the previous pixel of the same color
         for pxidx in 0..3 {
             let px_allidx = 2 + diffidx * 3 + pxidx;
-            let prev = dh!(out[px_allidx - 2]);
+            let prev = out[px_allidx - 2];
             let j = bits.get(24 + 2 + diffidx * (2 + 3 * 8) + pxidx * 8, 8) as u16;
             let px = decode_j(dh!(j), dbg!(shift), dh!(prev));
             /* TODO: dcraw code does an odd thing:
              * it will read extra 4 bits for the last 2 pixels if there's all 0's in the chunk. This should send the stream out of whack.
              * The pana_bits reader strongly suggests that the stream of data is separated into 16-byte chunks, so reading another byte (or half-byte if interrupted) would contradict it.
             */
-            out[px_allidx] = px;
+            out[px_allidx] = dh!(px);
         }
     }
     out
@@ -186,14 +187,19 @@ fn calculate_shift(pxs: &[u16]) -> (u8, [i16; 3]) {
         .zip(diffs.iter_mut())
         .for_each(|(d, o)| *o = d);
     let maxdiff = dh!(diffs).iter().map(|d| d.abs() as u16).max().unwrap();
-    let magnitude = dh!((maxdiff+1).next_power_of_two());
-    let shift = match magnitude >> 8 {
+    let maxpx = pxs[2..5].iter().max().unwrap();
+    let px_shift = [2, 1, 0].into_iter()
+        .filter(|shift| (0xffu16 << shift) > *maxpx)
+        .next()
+        .unwrap_or(4);
+    let diff_magnitude = dh!((maxdiff+1).next_power_of_two());
+    let shift = match diff_magnitude >> 8 {
         0 => 0,
         1 => 1,
         2 => 2,
-        _ => 4, // decoder has space for 4, but the TZ-101 doesn't use it
+        _ => 4,
     }; // if we tried to encode 4, then: 4 >> 3.saturating_sub((mag>>8) .neg().trailing_zeros())
-    (shift, diffs)
+    (cmp::min(shift, px_shift), diffs)
 }
 
 /// Fucking ENCODER. Because otherwise how do I reconstruct the original?
@@ -331,9 +337,20 @@ mod test {
             ar,
         );
     }
+    
     #[test]
     fn reencode1() {
         let ar = [0x21, 0x16, 0x47, 0x8f, 0x2d, 0x09, 0xa1, 0x26, 0x29, 0x6c, 0x61, 0x17, 0x30, 0xaf, 0xd3, 0x17];
+        
+        assert_eq_hex!(
+            encode_chunk(&decode_chunk(ReverseBits(ar))),
+            ar,
+        );
+    }
+    
+    #[test]
+    fn reencode2() {
+        let ar = [0x89, 0x91, 0x7a, 0xe8, 0x11, 0xf6, 0x31, 0x59, 0x88, 0x84, 0x5f, 0xbb, 0xac, 0x01, 0x90, 0x15];
         
         assert_eq_hex!(
             encode_chunk(&decode_chunk(ReverseBits(ar))),
@@ -358,7 +375,11 @@ mod test {
     }
     #[test]
     fn enc_diff_shift4() {
-        // raw mag = 0x400
+        // raw mag = 0x400, shift = 4
+        //diffs = [170, 3b4, fff8]
+        // j recalculation does not overflow when shift is reduced
+        // how does it even succeed with shift=2? 0x3b4 is > 0x200
+        // but 0xff << 2 = 0x3fc so ok in replacement mode
         assert_matches!(calculate_shift(&[0x159, 0x01, 0x2c9, 0x3b5, 0x2c1][..]), (2, _));
     }
     #[test]
@@ -373,7 +394,9 @@ mod test {
     }
     #[test]
     fn enc_diff_shift7() {
-        // raw mag = 0x400
+        // raw mag = 0x400, shift = 4
+        // diffs = [70, ff80, fda0]
+        // j recalculation overflows when shift is reduced, unlike 4
         assert_matches!(calculate_shift(&[0x407, 0x1ef, 0x477, 0x16f, 0x217][..]), (4, _));
     }
 }
