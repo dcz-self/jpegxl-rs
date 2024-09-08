@@ -200,10 +200,11 @@ fn calculate_shift(pxs: &[u16]) -> (u8, [i16; 3]) {
         .unwrap_or(4);
         // +6 fails shift8, +7 fails shift9... +1 is "correct" apart from influence of dropped bits
         // maybe maxdiff should be masked
+        // maxdiff0 = 0x79 -> shift=0
         // maxdiff9 = 0x7a -> shift=0
         // maxdiff8 = 0x7a -> shift=1
-    let diff_magnitude = dh!((dh!(maxdiff | to_lsb_mask!(px_shift)) + 2).next_power_of_two());
-    let shift = match diff_magnitude >> 8 {
+    let diff_magnitude = (maxdiff + 1).next_power_of_two();
+    let shift = match dh!(diff_magnitude) >> 8 {
         0 => 0,
         1 => 1,
         2 => 2,
@@ -400,6 +401,16 @@ mod test {
     }
     
     #[test]
+    fn reencode6() {
+        let ar = [0x6a, 0x62, 0xf9, 0xa0, 0x83, 0x4a, 0x67, 0xe8, 0x48, 0x85, 0x10, 0x57, 0x45, 0x2e, 0x42, 0x3f];
+        
+        assert_eq_hex!(
+            encode_chunk(&decode_chunk(ReverseBits(ar))),
+            ar,
+        );
+    }
+    
+    #[test]
     fn enc_diff_shift() {
         assert_matches!(calculate_shift(&[0xbf, 0xc6, 0xbf, 0xc2, 0xc0][..]), (0, _));
         assert_matches!(calculate_shift(&[0xc2, 0xc0, 0xcd, 0xbc, 0xc6][..]), (0, _));
@@ -452,5 +463,11 @@ mod test {
         // (maxdiff + 8).next_power_of_two() = 80
         // diffs = [16, ff86, ffde]
         assert_matches!(calculate_shift(&[0x19e, 0x313, 0x1b4, 0x299, 0x192][..]), (0, _));
+    }
+    #[test]
+    fn enc_diff_shift0() {
+        // (maxdiff + 8).next_power_of_two() = 80
+        // diffs = [16, ff86, ffde]
+        assert_matches!(calculate_shift(&[0x200, 0x424, 0x279, 0x406, 0x263][..]), (0, _));
     }
 }
