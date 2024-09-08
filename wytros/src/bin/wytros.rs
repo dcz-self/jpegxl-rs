@@ -97,6 +97,18 @@ fn run() -> Result<()> {
             // I don't know what it changes apart from color profile in metadata anyway
             .color_encoding(jxl::encode::ColorEncoding::LinearSrgb)
             .build()?;
+            
+        let mut swizzled = Vec::<u16>::with_capacity((img.width() / 2 * img.height() / 2) as usize);
+        for y in 0..(img.height() / 2) {
+            for i in 0..(img.width() / 2) {
+                swizzled[(y * (img.width() / 2) + i) as usize] = if y % 2 == 0{
+                    (1 - (i as u16 % 2)) * 1024
+                } else {
+                    0
+                }
+            }
+        }
+            
         let encoded = enc.encode::<u16, u16>(&swizzled[..], img.width() / 2, img.height() / 2)?;
         let mut out = File::create("/mnt/space/rhn/out.jxl")?;
         out.write_all(&encoded)?;

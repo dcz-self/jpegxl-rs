@@ -285,6 +285,15 @@ impl JxlEncoder<'_, '_> {
         }
 
         self.check_enc_status(unsafe { JxlEncoderSetBasicInfo(self.enc, &basic_info) })?;
+        
+        let mut channel_info = unsafe {
+            let mut info = MaybeUninit::uninit();
+            // calling JxlEncoderInitExtraChannelInfo is pointless - if new fields appear in the future, then the pointer points to a too-small area of memory, guaranteeing crashes anyway.
+            info.assume_init()
+        };
+        channel_info = 
+
+        self.check_enc_status(unsafe { JxlEncoderInitExtraChannelInfo(self.enc, &basic_info) })?;
 
         self.check_enc_status(unsafe {
             JxlEncoderSetColorEncoding(self.enc, &self.color_encoding.into())

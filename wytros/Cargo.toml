@@ -1,5 +1,5 @@
 [package]
-authors = ["Inflation <me@shimotsuki.ink>"]
+authors = ["me <>"]
 categories = ["encoding", "multimedia::images"]
 description = "Losslessly compress RAW files with jpeg-xl"
 edition = "2021"
